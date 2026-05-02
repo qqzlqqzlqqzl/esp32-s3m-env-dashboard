@@ -5,21 +5,23 @@ This is a command-oriented playbook for future AI agents.
 ## Paths
 
 ```powershell
-$Project = "C:\Users\lyl\Desktop\ESP32\esp32_s3m_env_dashboard"
+$Project = "C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard"
 $OldProject = "C:\Users\lyl\Desktop\ESP32\esp32_sensor_hub"
+$HubRepo = "C:\Users\lyl\Desktop\ESP32Mini\smartusbhub"
 ```
 
 ## Preflight
 
 ```powershell
 git -C $Project status -sb
-git -C $OldProject status --short
+git -C $HubRepo status --short
 ```
 
 Expected:
 
 - Current project may have intentional changes.
-- Old project should remain clean unless user explicitly asked to edit it.
+- Mini SmartUSBHub copy should remain clean unless updating that tool.
+- Check `$OldProject` only for explicit old-board work or isolation audits.
 
 ## Host Tests
 

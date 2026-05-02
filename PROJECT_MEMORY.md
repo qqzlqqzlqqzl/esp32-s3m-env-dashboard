@@ -8,6 +8,8 @@ not reuse the older `esp32_sensor_hub` development-board project.
 Detailed AI-facing docs are in `docs/`. Start with `docs/AI_DOC_INDEX.md`, then
 read `docs/AI_PROJECT_STATE.md`, `docs/AI_HANDOFF.md`,
 `docs/AI_POWER_LONGRUN_CONTRACT.md`, and `docs/AI_TEST_CLOSURE_RUNBOOK.md`.
+The cross-project lessons distilled from the older development-board project
+are in `docs/AI_CROSS_PROJECT_LESSONS.md`.
 
 ## Hardware
 
@@ -53,6 +55,9 @@ demo. Reuse the engineering ideas from `esp32_sensor_hub`:
 - Browser dashboard with curves
 - Human-readable interpretation next to raw sensor values
 - Zero-trust smoke test before calling work complete
+- Keep common lab tools independent in each workspace. `smartusbhub` is a
+  shared tool, so both `C:\Users\lyl\Desktop\ESP32` and
+  `C:\Users\lyl\Desktop\ESP32Mini` may keep their own local copy.
 
 Do not copy unused old-board hardware into this project. The new minimal board
 does not use DHT, QMA, camera, ES8388, AP3216C, or the old development-board LCD.
@@ -107,7 +112,7 @@ Use Arduino CLI only:
 ```powershell
 $env:WIFI_STA_SSID="your-ssid"
 $env:WIFI_STA_PASS="your-password"
-arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --build-property "build.extra_flags=-DWIFI_STA_SSID=`"$env:WIFI_STA_SSID`" -DWIFI_STA_PASS=`"$env:WIFI_STA_PASS`"" "C:\Users\lyl\Desktop\ESP32\esp32_s3m_env_dashboard"
+arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --build-property "build.extra_flags=-DWIFI_STA_SSID=`"$env:WIFI_STA_SSID`" -DWIFI_STA_PASS=`"$env:WIFI_STA_PASS`"" "C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard"
 ```
 
 Upload through the ESP32 serial port, not the SmartUSBHub control port.

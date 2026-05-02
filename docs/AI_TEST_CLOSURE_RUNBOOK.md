@@ -8,7 +8,7 @@ based on visual inspection.
 Run from:
 
 ```powershell
-cd C:\Users\lyl\Desktop\ESP32\esp32_s3m_env_dashboard
+cd C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard
 ```
 
 1. Host ring test:
@@ -105,6 +105,16 @@ Smoke test currently checks:
 - Health.
 - Minute CSV.
 - Root HTML Chinese/dashboard content.
+
+Cross-project rule:
+
+- Reuse the old `esp32_sensor_hub` closure pattern, not its old hardware list.
+  The transferable parts are build/upload proof, serial URL discovery, health
+  API checks, dashboard checks, config persistence, reboot persistence, soak
+  checks, and explicit PASS evidence.
+- Do not add DHT, AP3216C, QMA6100P, ES8388, OV5640, XL9555, camera, speaker,
+  or old LCD requirements to this Mini project unless that hardware is actually
+  connected.
 
 ## Failure Triage
 

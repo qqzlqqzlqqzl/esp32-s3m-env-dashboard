@@ -21,12 +21,15 @@ Read order for a new AI session:
 10. `docs\AI_ERROR_LESSONS.md` - mistakes already made and fixes that worked.
 11. `docs\AI_OPERATIONS_PLAYBOOK.md` - repeatable commands for build, upload,
    smoke test, power measurement, and config switching.
-12. `TESTING.md` - smoke test contract and host-only test scope.
+12. `docs\AI_CROSS_PROJECT_LESSONS.md` - reusable engineering lessons from the
+   older development-board project without importing its hardware assumptions.
+13. `TESTING.md` - smoke test contract and host-only test scope.
 
 Core repository state:
 
 - GitHub remote: `https://github.com/qqzlqqzlqqzl/esp32-s3m-env-dashboard.git`
 - Main firmware: `esp32_s3m_env_dashboard.ino`
+- Project root: `C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard`
 - Board: 正点原子 DNESP32S3M minimal system board.
 - Upload port: `COM20`
 - SmartUSBHub control port: `COM9`

@@ -26,6 +26,7 @@ AI documentation:
 - Test closure: `docs/AI_TEST_CLOSURE_RUNBOOK.md`
 - Storage notes: `docs/AI_STORAGE_RING_NOTES.md`
 - Power measurements: `docs/AI_POWER_MEASUREMENT_LOG.md`
+- Cross-project lessons: `docs/AI_CROSS_PROJECT_LESSONS.md`
 - Known mistakes: `docs/AI_ERROR_LESSONS.md`
 
 Normal operating defaults:
@@ -83,13 +84,13 @@ Build:
 ```powershell
 $env:WIFI_STA_SSID="your-ssid"
 $env:WIFI_STA_PASS="your-password"
-arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --build-property "build.extra_flags=-DWIFI_STA_SSID=`"$env:WIFI_STA_SSID`" -DWIFI_STA_PASS=`"$env:WIFI_STA_PASS`"" "C:\Users\lyl\Desktop\ESP32\esp32_s3m_env_dashboard"
+arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --build-property "build.extra_flags=-DWIFI_STA_SSID=`"$env:WIFI_STA_SSID`" -DWIFI_STA_PASS=`"$env:WIFI_STA_PASS`"" "C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard"
 ```
 
 Upload example:
 
 ```powershell
-arduino-cli upload -p COM20 --fqbn "esp32:esp32:esp32s3:PSRAM=opi" "C:\Users\lyl\Desktop\ESP32\esp32_s3m_env_dashboard"
+arduino-cli upload -p COM20 --fqbn "esp32:esp32:esp32s3:PSRAM=opi" "C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard"
 ```
 
 If the board is behind SmartUSBHub, do not upload to the hub control port

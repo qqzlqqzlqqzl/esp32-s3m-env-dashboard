@@ -13,7 +13,7 @@ python .\tools\measure_ch1_current.py --port COM9 --channel 1 --samples 80
 Dependencies:
 
 - Imports `SmartUSBHub` from sibling repo:
-  `C:\Users\lyl\Desktop\ESP32\smartusbhub`
+  `C:\Users\lyl\Desktop\ESP32Mini\smartusbhub`
 - Uses SmartUSBHub control port `COM9`
 - Measures channel `CH1`
 

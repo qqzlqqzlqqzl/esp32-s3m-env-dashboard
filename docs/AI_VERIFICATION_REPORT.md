@@ -9,7 +9,7 @@ checks.
 Command pattern:
 
 ```powershell
-arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --build-path "C:\Users\lyl\Desktop\ESP32\esp32_s3m_env_dashboard\.arduino-build" --build-property 'build.extra_flags=-DWIFI_STA_SSID="<ssid>" -DWIFI_STA_PASS="<redacted>"' "C:\Users\lyl\Desktop\ESP32\esp32_s3m_env_dashboard"
+arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --build-path "C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard\.arduino-build" --build-property 'build.extra_flags=-DWIFI_STA_SSID="<ssid>" -DWIFI_STA_PASS="<redacted>"' "C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard"
 ```
 
 Observed result after low-power implementation:
@@ -26,7 +26,7 @@ examples in docs.
 Command:
 
 ```powershell
-arduino-cli upload -p COM20 --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --input-dir "C:\Users\lyl\Desktop\ESP32\esp32_s3m_env_dashboard\.arduino-build" "C:\Users\lyl\Desktop\ESP32\esp32_s3m_env_dashboard"
+arduino-cli upload -p COM20 --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --input-dir "C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard\.arduino-build" "C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard"
 ```
 
 Observed result:
@@ -137,3 +137,44 @@ Initial repository push:
 - Commit: `9d287a2 Add ESP32-S3M environment dashboard power optimization`
 
 Docs update should be pushed as a follow-up commit.
+
+## 2026-05-03 Workspace Separation Check
+
+Purpose:
+
+- Move Mini project knowledge into `C:\Users\lyl\Desktop\ESP32Mini` while
+  keeping `C:\Users\lyl\Desktop\ESP32` independently usable.
+- Copy common tools instead of making one workspace depend on the other.
+
+Observed evidence:
+
+- Copied Arduino CLI archive to `C:\Users\lyl\Desktop\ESP32Mini\tools`; SHA256
+  matched the source archive in `C:\Users\lyl\Desktop\ESP32\tools`.
+- Copied `smartusbhub` back to `C:\Users\lyl\Desktop\ESP32\smartusbhub`; Git
+  status was clean and remote remained
+  `https://github.com/qqzlqqzlqqzl/smartusbhub.git`.
+- Mini SmartUSBHub import resolved to
+  `C:\Users\lyl\Desktop\ESP32Mini\smartusbhub\smartusbhub.py`.
+- Old workspace SmartUSBHub import resolved to
+  `C:\Users\lyl\Desktop\ESP32\smartusbhub\smartusbhub.py`.
+- Mini host tests passed:
+  - `python .\tools\test_ring_log.py` -> `[PASS] 5 ring log tests`
+  - `python .\tools\test_power_config.py` -> `[PASS] 6 power contract tests`
+  - `python -m py_compile .\tools\measure_ch1_current.py` -> exit 0
+- Mini Arduino CLI compile passed:
+  - Sketch: `910989 bytes (69%)`
+  - Globals: `78252 bytes (23%)`
+- Old `esp32_sensor_hub` Arduino CLI compile passed:
+  - Sketch: `1299221 bytes (99%)`
+  - Globals: `186176 bytes (56%)`
+- Mini CH1 current script ran through SmartUSBHub:
+  - `avg_mA=102.2`
+  - `min_mA=40.0`
+  - `max_mA=121.0`
+  - `samples=10`
+  - `avg_voltage_mV=5118`
+
+Residual note:
+
+- `C:\Users\lyl\Desktop\ESP32\esp32_sensor_hub\.arduino-build-check` is an
+  untracked build cache created for compile verification. It is not source code.

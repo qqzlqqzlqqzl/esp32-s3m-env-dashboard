@@ -11,8 +11,10 @@ Mistake risk:
 
 Correct handling:
 
-- Current clean project is `C:\Users\lyl\Desktop\ESP32\esp32_s3m_env_dashboard`.
+- Current clean project is `C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard`.
 - Old project is `C:\Users\lyl\Desktop\ESP32\esp32_sensor_hub`.
+- The two workspaces must be independently usable. Do not make one workspace
+  depend on files inside the other workspace.
 - Always check old project status if worried:
 
 ```powershell
@@ -42,6 +44,9 @@ Correct handling:
 
 - Firmware upload port: `COM20`.
 - SmartUSBHub control port: `COM9`.
+- This Mini project imports SmartUSBHub from
+  `C:\Users\lyl\Desktop\ESP32Mini\smartusbhub`. The old workspace has its own
+  copy at `C:\Users\lyl\Desktop\ESP32\smartusbhub`.
 - If `COM9` is busy, find/kill stale Python processes before measuring.
 - Prefer explicit `SmartUSBHub("COM9")` over broad scan when other serial
   devices are present.
@@ -108,7 +113,7 @@ Correct handling:
 - In direct PowerShell commands, single-quote the build property:
 
 ```powershell
-arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --build-property 'build.extra_flags=-DWIFI_STA_SSID="SSID" -DWIFI_STA_PASS="PASS"' "C:\Users\lyl\Desktop\ESP32\esp32_s3m_env_dashboard"
+arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --build-property 'build.extra_flags=-DWIFI_STA_SSID="SSID" -DWIFI_STA_PASS="PASS"' "C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard"
 ```
 
 - In committed docs, avoid real credentials and prefer env var examples.

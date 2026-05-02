@@ -8,9 +8,12 @@ assumed before making changes.
 - Project: ESP32-S3M environment monitoring station.
 - Board: 正点原子 DNESP32S3M minimal system board.
 - This is not the older `esp32_sensor_hub` development-board project.
-- Current project root: `C:\Users\lyl\Desktop\ESP32\esp32_s3m_env_dashboard`
+- Current project root: `C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard`
 - Old project to avoid unless explicitly requested:
   `C:\Users\lyl\Desktop\ESP32\esp32_sensor_hub`
+- Common SmartUSBHub tooling is intentionally duplicated per workspace:
+  `C:\Users\lyl\Desktop\ESP32Mini\smartusbhub` for this project and
+  `C:\Users\lyl\Desktop\ESP32\smartusbhub` for the old workspace.
 
 ## Hardware Facts
 

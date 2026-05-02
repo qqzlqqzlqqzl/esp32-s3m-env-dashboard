@@ -3,6 +3,12 @@
 This project uses a zero-trust smoke test. A build that only "looks OK" is not
 accepted.
 
+The old `esp32_sensor_hub` project is useful as a test-closure reference, but
+only its engineering pattern is reusable here. Keep build/upload proof, serial
+URL discovery, API health checks, dashboard checks, config persistence, reboot
+persistence, soak checks, and explicit PASS evidence. Do not inherit its DHT,
+camera, audio, AP3216C, QMA6100P, XL9555, or old LCD requirements.
+
 Run from PowerShell:
 
 ```powershell
@@ -54,6 +60,9 @@ The smoke test checks:
 - `/api/log.csv` downloads a minute aggregate CSV header and data row.
 - CO2, SHT41 temperature/humidity, and BH1750 lux values are in plausible ranges.
 - Root HTML page is served and includes the trend chart and interpretation panel.
+- Test reports should record the command, endpoint or script used, the observed
+  result, and the key metric that proves the check, rather than only saying
+  that the page looked normal.
 
 The Power optimization contract currently verifies that future firmware exposes
 `power_mode`, `lcd_brightness_pct`, `backlight_timeout_ms`, `wifi_sta_sleep`,
