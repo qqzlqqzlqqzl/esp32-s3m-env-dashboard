@@ -5,6 +5,10 @@ Target board: ALIENTEK / 正点原子 DNESP32S3M minimal system board.
 This is a clean Arduino CLI project for the minimal board. It intentionally does
 not reuse the older `esp32_sensor_hub` development-board project.
 
+Detailed AI-facing docs are in `docs/`. Start with `docs/AI_DOC_INDEX.md`, then
+read `docs/AI_PROJECT_STATE.md`, `docs/AI_HANDOFF.md`,
+`docs/AI_POWER_LONGRUN_CONTRACT.md`, and `docs/AI_TEST_CLOSURE_RUNBOOK.md`.
+
 ## Hardware
 
 - I2C sensors:

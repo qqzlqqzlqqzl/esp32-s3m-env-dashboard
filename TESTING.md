@@ -24,6 +24,13 @@ Power measurement:
 python .\tools\measure_ch1_current.py --port COM9 --channel 1 --samples 80
 ```
 
+Smoke test side effect:
+
+- `tools/smoke_test.ps1` POSTs a fast test configuration to `/api/config`.
+- After smoke, restore the desired runtime mode, usually `low_power`, if the
+  device should continue running as a low-power station.
+- Full AI closure sequence is in `docs/AI_TEST_CLOSURE_RUNBOOK.md`.
+
 The smoke test checks:
 
 - Host ring-buffer logic.

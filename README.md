@@ -16,6 +16,18 @@ Features:
 - Uses Arduino CLI build and upload flow
 - Tracks the Power optimization contract in `tools/test_power_config.py`
 
+AI documentation:
+
+- Future AI agents should start at `docs/AI_DOC_INDEX.md`.
+- Current state: `docs/AI_PROJECT_STATE.md`
+- Handoff: `docs/AI_HANDOFF.md`
+- API contract: `docs/AI_API_CONTRACT.md`
+- Power/long-run contract: `docs/AI_POWER_LONGRUN_CONTRACT.md`
+- Test closure: `docs/AI_TEST_CLOSURE_RUNBOOK.md`
+- Storage notes: `docs/AI_STORAGE_RING_NOTES.md`
+- Power measurements: `docs/AI_POWER_MEASUREMENT_LOG.md`
+- Known mistakes: `docs/AI_ERROR_LESSONS.md`
+
 Normal operating defaults:
 
 - Fast SHT41/SGP41/BH1750 read interval: `1000 ms`
