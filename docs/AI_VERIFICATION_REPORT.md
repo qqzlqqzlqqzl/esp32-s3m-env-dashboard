@@ -178,3 +178,87 @@ Residual note:
 
 - `C:\Users\lyl\Desktop\ESP32\esp32_sensor_hub\.arduino-build-check` is an
   untracked build cache created for compile verification. It is not source code.
+
+## 2026-05-03 Post-Move Upload And Readback Check
+
+Purpose:
+
+- Prove the moved Mini project can still compile, upload to the ESP32-S3M
+  minimal system board, and read the connected environment sensors.
+
+Build and upload:
+
+- Project root: `C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard`
+- Upload port: `COM20`
+- SmartUSBHub control port avoided: `COM9`
+- Arduino CLI compile passed:
+  - Sketch: `911005 bytes (69%)`
+  - Globals: `78252 bytes (23%)`
+- Arduino CLI upload passed:
+  - Chip: ESP32-S3 rev v0.2
+  - MAC: `1c:db:d4:99:2b:c4`
+  - Hash verified for bootloader, partition table, boot app, and application.
+  - Hard reset completed.
+
+Serial readback:
+
+```text
+[ENV] sht=on 25.28C 70.51% scd=on co2=655 sgp=on voc=0 nox=0 raw=30625/0 bh=on 7.50lx fs=on log=114 fail=0 ip=192.168.124.67
+```
+
+HTTP/API readback used raw TCP GET requests to avoid host HTTP proxy/client
+interference seen with normal `curl` in this environment.
+
+Observed `/api/status`:
+
+- HTTP: `200 OK`
+- `ok=true`
+- I2C clock: `400000`
+- Sensors online:
+  - SHT41: `true`
+  - SCD41: `true`
+  - SGP41: `true`
+  - BH1750: `true`
+- Readings:
+  - SHT41 temperature: `25.66 C`
+  - SHT41 humidity: `74.5 %RH`
+  - SCD41 CO2: `677 ppm`
+  - SGP41 VOC index: `0`
+  - SGP41 NOx index: `0`
+  - BH1750 lux: `7.5 lx`
+- Storage:
+  - mounted: `true`
+  - ring ready: `true`
+  - ring count: `128`
+  - failures: `0`
+
+Observed `/api/health`:
+
+- HTTP: `200 OK`
+- `ok=true`
+- `sensors_ok=true`
+- `storage_ok=true`
+- `power_ok=true`
+- `power_mode=low_power`
+- `cpu_mhz=80`
+- `minute_rows=129`
+- `wifi_reconnects=0`
+
+Observed history, CSV, and HTML:
+
+- `/api/history?range=60`: HTTP `200 OK`, source `minute`, rows `60`
+- `/api/log.csv`: HTTP `200 OK`, CSV header present, rows `128`
+- `/`: HTTP `200 OK`, HTML bytes `21474`; required Chinese dashboard markers
+  present:
+  - `ESP32-S3M 环境监测站`
+  - `趋势曲线`
+  - `数据解读`
+  - `阈值依据`
+
+Notes:
+
+- Normal `curl` and `Invoke-WebRequest` showed intermittent timeout or proxy
+  behavior, while raw TCP requests to the board returned valid HTTP responses.
+- Health reported accumulated `loop_stalls`; because `health.ok=true` and
+  storage/sensor checks passed, this was recorded as evidence to watch during
+  longer soak rather than treated as a move-regression.

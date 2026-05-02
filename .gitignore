@@ -1,3 +1,4 @@
 .arduino-build/
+.arduino-build*/
 __pycache__/
 *.pyc
