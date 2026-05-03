@@ -35,6 +35,10 @@ Write-Host "[TEST] Host power-management contract"
 python .\tools\test_power_config.py
 Assert-True ($LASTEXITCODE -eq 0) "Host power-management contract tests failed"
 
+Write-Host "[TEST] Host dashboard/API contract"
+python .\tools\test_dashboard_contract.py
+Assert-True ($LASTEXITCODE -eq 0) "Host dashboard/API contract tests failed"
+
 $extraFlags = ""
 if ($env:WIFI_STA_SSID) {
   $extraFlags += " -DWIFI_STA_SSID=`"$($env:WIFI_STA_SSID)`""
@@ -103,6 +107,10 @@ Assert-True ($status.storage.mounted -eq $true) "LittleFS is not mounted"
 Assert-True ($null -ne $status.interpretation.co2.text) "CO2 interpretation missing"
 Assert-True ($null -ne $status.interpretation.voc.text) "VOC interpretation missing"
 Assert-True ($null -ne $status.config.log_interval_ms) "Config block missing"
+Assert-True ($null -ne $status.time.time_source) "Time sync block missing"
+Assert-True ($null -ne $status.time.epoch_s) "Time epoch missing"
+Assert-True ($null -ne $status.time.local_time) "Local time field missing"
+Assert-True ($null -ne $status.power.web_boost_active) "Web boost status missing"
 Assert-True ($null -ne $status.sensor_options.sht41.available) "Sensor options block missing"
 Assert-True ($status.storage.ring_ready -eq $true) "Minute ring is not ready"
 Assert-True ([int]$status.storage.ring_capacity -eq 10080) "Minute ring capacity is not 10080"
@@ -141,6 +149,12 @@ Assert-True ($health.ok -eq $true) "Health API reports not ok"
 Assert-True ($health.ring_ready -eq $true) "Health API reports ring not ready"
 Assert-True ([int]$health.minute_rows -ge 1) "Health API minute_rows is empty"
 
+$boostRaw = & curl.exe --noproxy "*" --silent --show-error --fail --max-time 8 -X POST "http://$Ip/api/performance/boost?duration_ms=60000"
+Assert-True ($LASTEXITCODE -eq 0) "curl POST /api/performance/boost failed"
+$boost = (($boostRaw -join "`n") | ConvertFrom-Json)
+Assert-True ($boost.boosted -eq $true) "Performance boost did not report boosted=true"
+Assert-True ($boost.web_boost_active -eq $true) "Performance boost did not become active"
+
 $csv = & curl.exe --noproxy "*" --silent --show-error --fail --max-time 8 "http://$Ip/api/log.csv"
 Assert-True ($LASTEXITCODE -eq 0) "curl /api/log.csv failed"
 $csvText = $csv -join "`n"
@@ -158,5 +172,8 @@ Assert-True ([bool]($htmlText -match "阈值依据")) "Root HTML did not contain
 Assert-True ([bool]($htmlText -match "可暴露的传感器能力")) "Root HTML did not contain sensor capability section"
 Assert-True ([bool]($htmlText -match "1天")) "Root HTML did not contain one-day history button"
 Assert-True ([bool]($htmlText -match "重置配置")) "Root HTML did not contain config reset button"
+Assert-True ([bool]($htmlText -match "数据清零")) "Root HTML did not contain log clear button"
+Assert-True ([bool]($htmlText -match "加速查看")) "Root HTML did not contain performance boost button"
+Assert-True ([bool]($htmlText -match "minuteCache")) "Root HTML did not contain browser history cache"
 
 Write-Host "[PASS] Smoke test passed for $ProjectRoot at http://$Ip/"

@@ -14,6 +14,7 @@
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
 #include <math.h>
+#include <time.h>
 
 #ifndef WIFI_STA_SSID
 #define WIFI_STA_SSID ""
@@ -62,11 +63,38 @@ constexpr char kMinuteRingPath[] = "/env_min.hdr";
 constexpr char kLegacyMinuteRingPath[] = "/env_min.ring";
 constexpr char kConfigPath[] = "/env_config.txt";
 constexpr char kConfigTmpPath[] = "/env_config.tmp";
+constexpr char kTimeZone[] = "CST-8";
+constexpr char kNtpServer1[] = "pool.ntp.org";
+constexpr char kNtpServer2[] = "time.nist.gov";
+constexpr uint32_t kTimeValidEpoch = 1700000000UL;
+constexpr unsigned long kNtpRetryMs = 60000UL;
+constexpr unsigned long kNtpRefreshMs = 12UL * 60UL * 60UL * 1000UL;
+constexpr uint32_t kDefaultWebBoostMs = 180000UL;
+constexpr uint32_t kMaxWebBoostMs = 600000UL;
+constexpr uint32_t kButtonLongPressMs = 850UL;
 
 enum PowerMode : uint8_t {
   POWER_LOW = 0,
   POWER_BALANCED = 1,
   POWER_PERFORMANCE = 2,
+};
+
+enum ButtonEvent : uint8_t {
+  BUTTON_NONE = 0,
+  BUTTON_SHORT = 1,
+  BUTTON_LONG = 2,
+};
+
+enum MenuItem : uint8_t {
+  MENU_POWER = 0,
+  MENU_LCD_BRIGHTNESS,
+  MENU_BACKLIGHT_TIMEOUT,
+  MENU_WIFI_SLEEP,
+  MENU_SHT_PRECISION,
+  MENU_BH_MODE,
+  MENU_WEB_BOOST,
+  MENU_SAVE_EXIT,
+  MENU_COUNT,
 };
 
 constexpr uint16_t RGB565(uint8_t r, uint8_t g, uint8_t b) {
@@ -102,6 +130,16 @@ uint8_t gDisplayPage = 0;
 bool gForceDisplayDraw = true;
 bool gBacklightOn = true;
 uint32_t gLastUserActivityMs = 0;
+bool gTimeSyncStarted = false;
+bool gTimeSynced = false;
+uint32_t gLastTimeSyncAttemptMs = 0;
+uint32_t gLastTimeSyncOkMs = 0;
+time_t gLastSyncedEpoch = 0;
+uint32_t gWebBoostUntilMs = 0;
+bool gLastAppliedWebBoost = false;
+bool gMenuMode = false;
+bool gMenuEditing = false;
+uint8_t gMenuIndex = 0;
 
 void applyPowerRuntimeConfig();
 
@@ -282,8 +320,10 @@ const char kIndexHtml[] PROGMEM = R"HTML(
       <a class="btn" href="/api/status" target="_blank">JSON</a>
       <a class="btn" href="/api/history" target="_blank">历史数据</a>
       <a class="btn" href="/api/log.csv" target="_blank">分钟 CSV</a>
+      <button class="btn" id="boostPerf" type="button">加速查看</button>
       <button class="btn" id="saveCfg" type="button">保存配置</button>
       <button class="btn" id="resetCfg" type="button">重置配置</button>
+      <button class="btn" id="clearLog" type="button">数据清零</button>
     </div>
     <div class="grid">
       <section class="card"><div class="label">SCD41 二氧化碳</div><div class="value" id="co2">--</div><div class="meta" id="scd">离线</div><div class="meta" id="co2Meaning">--</div></section>
@@ -291,7 +331,7 @@ const char kIndexHtml[] PROGMEM = R"HTML(
       <section class="card"><div class="label">SHT41 湿度</div><div class="value" id="rh">--</div><div class="meta">相对湿度</div></section>
       <section class="card"><div class="label">BH1750 光照</div><div class="value" id="lux">--</div><div class="meta" id="bh">离线</div><div class="meta" id="luxMeaning">--</div></section>
       <section class="card wide"><div class="label">SGP41 气体指数</div><div class="value small" id="gas">--</div><div class="meta" id="sgp">离线</div><div class="meta" id="gasMeaning">--</div></section>
-      <section class="card wide"><div class="label">系统 / 存储</div><div class="value small" id="state">--</div><div class="meta" id="uptime">--</div><div class="meta" id="storage">--</div></section>
+      <section class="card wide"><div class="label">系统 / 存储</div><div class="value small" id="state">--</div><div class="meta" id="uptime">--</div><div class="meta" id="storage">--</div><div class="meta" id="timeState">时间同步：--</div></section>
       <section class="card full">
         <div class="label">趋势曲线</div>
         <div class="toolbar">
@@ -302,6 +342,7 @@ const char kIndexHtml[] PROGMEM = R"HTML(
           <button class="btn rangeBtn" data-range="4320" type="button">3天</button>
           <button class="btn rangeBtn" data-range="all" type="button">全部分钟</button>
         </div>
+        <div class="meta" id="historyMeta">历史数据加载中...</div>
         <div class="charts">
           <div class="chartBox"><div class="chartTitle"><span>CO2 二氧化碳</span><span class="tag">ppm</span></div><canvas id="chartCo2" width="440" height="180"></canvas></div>
           <div class="chartBox"><div class="chartTitle"><span>VOC 指数</span><span class="tag">index</span></div><canvas id="chartVoc" width="440" height="180"></canvas></div>
@@ -403,6 +444,10 @@ const char kIndexHtml[] PROGMEM = R"HTML(
     let configLoaded = false;
     let latestStatus = null;
     let historyRange = 'ram';
+    const MAX_CHART_POINTS = 360;
+    const rangeMinutes = { '60':60, '360':360, '1440':1440, '4320':4320 };
+    const minuteCache = { loaded:false, loading:null, rows:[], totalRows:0, loadedAt:0 };
+    const ramCache = { rows:[], loadedAt:0 };
     function cls(level) { return level === 'bad' ? 'bad' : level === 'warn' ? 'warn' : 'ok'; }
     function setConfigInputs(c) {
       if (configLoaded || !c) return;
@@ -432,15 +477,48 @@ const char kIndexHtml[] PROGMEM = R"HTML(
       $('cfgState').textContent = `配置已加载 / power ${c.power_mode} / 每 ${Math.round(c.log_interval_ms / 1000)} 秒更新实时样本，Flash 固定每分钟聚合保存`;
       configLoaded = true;
     }
-    function drawOneChart(def, rows) {
+    function decimateRows(rows) {
+      if (!rows || rows.length <= MAX_CHART_POINTS) return rows || [];
+      const out = [];
+      const step = (rows.length - 1) / (MAX_CHART_POINTS - 1);
+      for (let i = 0; i < MAX_CHART_POINTS; i++) out.push(rows[Math.round(i * step)]);
+      return out;
+    }
+    function formatMinuteLabel(row) {
+      if (!row) return '--';
+      if (row.minute && row.minute > 28000000) {
+        const d = new Date(Number(row.minute) * 60000);
+        return d.toLocaleString();
+      }
+      if (row.uptime_ms) return `运行 ${Math.round(Number(row.uptime_ms) / 60000)} 分钟`;
+      return `第 ${row.minute ?? '--'} 分钟`;
+    }
+    function updateHistoryButtons() {
+      document.querySelectorAll('.rangeBtn').forEach(btn => {
+        btn.classList.toggle('ok', btn.dataset.range === historyRange);
+      });
+    }
+    function drawOneChart(def, rows, totalRows) {
       const ctx = def.el.getContext('2d');
       const w = def.el.width, h = def.el.height;
       const left = 48, right = 10, top = 12, bottom = 28;
       const plotW = w - left - right, plotH = h - top - bottom;
       ctx.clearRect(0,0,w,h);
-      const values = (rows || []).map(r => Number(r[def.key])).filter(v => Number.isFinite(v));
-      const dataMax = values.length ? Math.max(...values) : def.max;
-      const dataMin = values.length ? Math.min(...values) : def.min;
+      let dataMax = def.max;
+      let dataMin = def.min;
+      let valueCount = 0;
+      (rows || []).forEach(r => {
+        const value = Number(r[def.key]);
+        if (!Number.isFinite(value)) return;
+        if (valueCount === 0) {
+          dataMax = value;
+          dataMin = value;
+        } else {
+          if (value > dataMax) dataMax = value;
+          if (value < dataMin) dataMin = value;
+        }
+        valueCount++;
+      });
       const yMin = Math.min(def.min, dataMin);
       const yMax = Math.max(def.max, dataMax * 1.1, yMin + 1);
       ctx.strokeStyle = '#263a4d';
@@ -472,12 +550,15 @@ const char kIndexHtml[] PROGMEM = R"HTML(
       ctx.fillStyle = '#91a6ba';
       ctx.font = '11px Segoe UI';
       ctx.textAlign = 'left';
-      ctx.fillText(historyRange === 'ram' ? `最近 ${rows.length} 个实时样本` : `最近 ${rows.length} 个分钟点`, left, h - 8);
+      const shownText = totalRows && totalRows > rows.length ? `${rows.length}/${totalRows}` : `${rows.length}`;
+      ctx.fillText(historyRange === 'ram' ? `实时样本 ${shownText}` : `分钟点 ${shownText}`, left, h - 8);
       ctx.textAlign = 'right';
       ctx.fillText(def.unit, w - right, h - 8);
     }
     function drawChart(rows) {
-      Object.values(charts).forEach(def => drawOneChart(def, rows));
+      const sourceRows = rows || [];
+      const drawRows = decimateRows(sourceRows);
+      requestAnimationFrame(() => Object.values(charts).forEach(def => drawOneChart(def, drawRows, sourceRows.length)));
     }
     async function refresh() {
       const r = await fetch('/api/status', {cache:'no-store'});
@@ -504,6 +585,8 @@ const char kIndexHtml[] PROGMEM = R"HTML(
       $('state').className = `value small ${s.ok ? 'ok' : 'bad'}`;
       $('uptime').textContent = `运行 ${s.system.uptime_s}s / 剩余堆内存 ${s.system.heap}`;
       $('storage').textContent = `LittleFS ${s.storage.mounted ? '已挂载' : '离线'} / 分钟 ${s.storage.ring_count}/${s.storage.ring_capacity} / 失败 ${s.storage.failures}`;
+      $('timeState').textContent = `时间同步：${s.time && s.time.sync_time ? s.time.local_time : '未同步，使用运行分钟'} / ${s.time ? s.time.time_source : 'unknown'}`;
+      $('boostPerf').classList.toggle('ok', !!(s.power && s.power.web_boost_active));
       const rows = [
         ['I2C', `SDA ${s.i2c.sda}, SCL ${s.i2c.scl}, ${s.i2c.clock_hz} Hz`],
         ['SHT41 初始化', s.sht41.init_error],
@@ -512,8 +595,10 @@ const char kIndexHtml[] PROGMEM = R"HTML(
         ['Flash 环形日志', `${s.storage.ring_path}, ${s.storage.ring_count}/${s.storage.ring_capacity} 分钟点`],
         ['实时缓存', `${s.storage.raw_ram_rows} 条，间隔 ${s.config.log_interval_ms} ms`],
         ['Power optimization', `${s.power.power_mode}, LCD ${s.power.lcd_brightness_pct}%, 背光 ${s.power.backlight_on ? '开' : '关'}, sensor ${s.power.sensor_interval_ms} ms`],
+        ['网页加速', s.power.web_boost_active ? '开启：临时关闭 WiFi sleep，保持 80MHz 低功耗 CPU' : '关闭：按配置省电'],
         ['长期运行', `WiFi重连 ${s.network.reconnects} 次，loop卡顿 ${s.system.loop_stalls} 次，最大间隔 ${s.system.max_loop_gap_ms} ms`],
         ['Flash写入耗时', `最近 ${s.storage.last_persist_duration_ms} ms，最大 ${s.storage.max_persist_duration_ms} ms`],
+        ['时间', s.time && s.time.sync_time ? `${s.time.local_time} / epoch ${s.time.epoch_s}` : '未同步：日志分钟先按运行时间计'],
         ['IP', s.network.ip],
       ];
       $('rows').innerHTML = rows.map(x => `<tr><th>${x[0]}</th><td>${x[1]}</td></tr>`).join('');
@@ -522,11 +607,55 @@ const char kIndexHtml[] PROGMEM = R"HTML(
         liveTimer = setInterval(() => refresh().catch(()=>{}), Number(s.config.live_refresh_ms));
       }
     }
-    async function refreshHistory() {
-      const qs = historyRange === 'ram' ? '' : `?range=${encodeURIComponent(historyRange)}`;
-      const r = await fetch('/api/history' + qs, {cache:'no-store'});
-      const h = await r.json();
-      drawChart(h.rows || []);
+    async function ensureMinuteCache(force=false) {
+      if (minuteCache.loading) return minuteCache.loading;
+      if (!force && minuteCache.loaded) return minuteCache;
+      $('historyMeta').textContent = '正在从 ESP32 读取全部分钟历史，之后切换 1小时/6小时/1天 会直接用浏览器缓存...';
+      minuteCache.loading = fetch('/api/history?range=all', {cache:'no-store'})
+        .then(r => r.json())
+        .then(h => {
+          minuteCache.rows = h.rows || [];
+          minuteCache.totalRows = h.total_rows || minuteCache.rows.length;
+          minuteCache.loaded = true;
+          minuteCache.loadedAt = Date.now();
+          minuteCache.loading = null;
+          return minuteCache;
+        })
+        .catch(err => {
+          minuteCache.loading = null;
+          throw err;
+        });
+      return minuteCache.loading;
+    }
+    function sliceRowsForRange(range) {
+      if (range === 'all') return minuteCache.rows;
+      const minutes = rangeMinutes[range] || 60;
+      return minuteCache.rows.slice(Math.max(0, minuteCache.rows.length - minutes));
+    }
+    function renderHistoryRange() {
+      updateHistoryButtons();
+      let rows = [];
+      if (historyRange === 'ram') {
+        rows = ramCache.rows;
+        $('historyMeta').textContent = `实时缓存 ${rows.length} 点，来自 RAM；切换分钟范围时会使用浏览器缓存。`;
+      } else {
+        rows = sliceRowsForRange(historyRange);
+        const first = rows[0], last = rows[rows.length - 1];
+        $('historyMeta').textContent = `浏览器已缓存 ${minuteCache.rows.length}/${minuteCache.totalRows} 个分钟点；当前显示 ${rows.length} 点，${formatMinuteLabel(first)} 到 ${formatMinuteLabel(last)}。`;
+      }
+      drawChart(rows);
+    }
+    async function refreshHistory(force=false) {
+      if (historyRange === 'ram') {
+        const r = await fetch('/api/history', {cache:'no-store'});
+        const h = await r.json();
+        ramCache.rows = h.rows || [];
+        ramCache.loadedAt = Date.now();
+        renderHistoryRange();
+        return;
+      }
+      await ensureMinuteCache(force);
+      renderHistoryRange();
     }
     $('saveCfg').addEventListener('click', async () => {
       const params = new URLSearchParams({
@@ -567,16 +696,48 @@ const char kIndexHtml[] PROGMEM = R"HTML(
       configLoaded = false;
       await refresh();
     });
+    $('boostPerf').addEventListener('click', async () => {
+      $('historyMeta').textContent = '正在开启 3 分钟网页加速...';
+      const r = await fetch('/api/performance/boost?duration_ms=180000', {method:'POST', cache:'no-store'});
+      $('historyMeta').textContent = r.ok ? '网页加速已开启：临时关闭 WiFi 省电，保持低功耗 CPU 频率。' : '网页加速开启失败';
+      await refresh();
+    });
+    $('clearLog').addEventListener('click', async () => {
+      if (!confirm('确认清零历史数据？这会删除 LittleFS 分钟日志和当前 RAM 实时缓存，配置不会被删除。')) return;
+      $('historyMeta').textContent = '正在清零历史数据...';
+      const r = await fetch('/api/log/clear?confirm=1', {method:'POST', cache:'no-store'});
+      if (!r.ok) {
+        $('historyMeta').textContent = '数据清零失败';
+        return;
+      }
+      minuteCache.loaded = false;
+      minuteCache.rows = [];
+      minuteCache.totalRows = 0;
+      ramCache.rows = [];
+      await refresh();
+      await refreshHistory(true);
+      $('historyMeta').textContent = '历史数据已清零，新的分钟点会继续写入。';
+    });
     document.querySelectorAll('.rangeBtn').forEach(btn => {
       btn.addEventListener('click', async () => {
         historyRange = btn.dataset.range;
-        await refreshHistory();
+        if (historyRange !== 'ram') {
+          await ensureMinuteCache();
+        }
+        renderHistoryRange();
       });
     });
+    fetch('/api/performance/boost?duration_ms=180000', {method:'POST', cache:'no-store'}).catch(()=>{});
     refresh().catch(()=>{});
     refreshHistory().catch(()=>{});
+    ensureMinuteCache().then(() => {
+      if (historyRange === 'ram') $('historyMeta').textContent = `分钟历史已预加载 ${minuteCache.rows.length} 点，切换 1小时/6小时/1天会直接本地显示。`;
+    }).catch(()=>{});
     liveTimer = setInterval(() => refresh().catch(()=>{}), 1000);
-    setInterval(() => refreshHistory().catch(()=>{}), 10000);
+    setInterval(() => {
+      if (historyRange === 'ram') refreshHistory().catch(()=>{});
+      else if (Date.now() - minuteCache.loadedAt > 60000) refreshHistory(true).catch(()=>{});
+    }, 10000);
   </script>
 </body>
 </html>
@@ -662,6 +823,27 @@ void noteUserActivity() {
     setBacklight(true);
     gForceDisplayDraw = true;
   }
+}
+
+bool webBoostActive() {
+  const uint32_t now = millis();
+  return gWebBoostUntilMs != 0 && static_cast<int32_t>(gWebBoostUntilMs - now) > 0;
+}
+
+void maintainWebBoostPower() {
+  const bool active = webBoostActive();
+  if (active == gLastAppliedWebBoost) return;
+  gLastAppliedWebBoost = active;
+  WiFi.setSleep(cfg.wifiStaSleep && !active);
+}
+
+void noteWebActivity(uint32_t durationMs = kDefaultWebBoostMs) {
+  uint32_t clamped = durationMs;
+  if (clamped < 5000UL) clamped = 5000UL;
+  if (clamped > kMaxWebBoostMs) clamped = kMaxWebBoostMs;
+  gWebBoostUntilMs = millis() + clamped;
+  WiFi.setSleep(false);
+  gLastAppliedWebBoost = true;
 }
 
 void handleBacklightTimeout() {
@@ -922,6 +1104,69 @@ void appendMeaning(String &json, const char *key, const char *level, const char 
   json += "}";
 }
 
+bool epochIsValid(time_t epoch) {
+  return epoch >= static_cast<time_t>(kTimeValidEpoch);
+}
+
+void updateTimeStateFromRtc() {
+  const time_t now = time(nullptr);
+  if (!epochIsValid(now)) return;
+  gTimeSynced = true;
+  gLastSyncedEpoch = now;
+  gLastTimeSyncOkMs = millis();
+}
+
+void maintainTimeSync() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  const uint32_t nowMs = millis();
+  const bool needsInitialSync = !gTimeSyncStarted;
+  const bool needsRetry = !gTimeSynced && nowMs - gLastTimeSyncAttemptMs >= kNtpRetryMs;
+  const bool needsRefresh = gTimeSynced && nowMs - gLastTimeSyncAttemptMs >= kNtpRefreshMs;
+  if (needsInitialSync || needsRetry || needsRefresh) {
+    configTzTime(kTimeZone, kNtpServer1, kNtpServer2);
+    gTimeSyncStarted = true;
+    gLastTimeSyncAttemptMs = nowMs;
+  }
+  updateTimeStateFromRtc();
+}
+
+uint32_t currentMinuteKey() {
+  const time_t now = time(nullptr);
+  if (epochIsValid(now)) return static_cast<uint32_t>(now / 60);
+  return millis() / 60000UL;
+}
+
+void formatLocalTime(char *buffer, size_t size, time_t epoch) {
+  if (!buffer || size == 0) return;
+  if (!epochIsValid(epoch)) {
+    snprintf(buffer, size, "unsynced");
+    return;
+  }
+  struct tm local = {};
+  localtime_r(&epoch, &local);
+  strftime(buffer, size, "%Y-%m-%d %H:%M:%S", &local);
+}
+
+void appendTimeStatus(String &json) {
+  const time_t now = time(nullptr);
+  const bool valid = epochIsValid(now);
+  char local[24];
+  formatLocalTime(local, sizeof(local), now);
+  json += "\"time\":{\"sync_time\":";
+  json += valid ? "true" : "false";
+  json += ",\"time_source\":\"";
+  json += valid ? "ntp_rtc" : "uptime";
+  json += "\",\"epoch_s\":";
+  json += valid ? String(static_cast<unsigned long>(now)) : "0";
+  json += ",\"epoch_minute\":";
+  json += String(currentMinuteKey());
+  json += ",\"local_time\":";
+  appendJsonString(json, local);
+  json += ",\"last_sync_ms\":";
+  json += String(gLastTimeSyncOkMs);
+  json += "}";
+}
+
 const char *co2Level() {
   if (env.scdCo2 >= cfg.co2BadPpm) return "bad";
   if (env.scdCo2 >= cfg.co2WarnPpm) return "warn";
@@ -1078,6 +1323,22 @@ bool readMinuteRingRecord(uint32_t logicalIndex, MinuteRingRecord *record) {
   return ok;
 }
 
+bool readMinuteRingSlotCached(uint32_t slot, MinuteRingRecord *record, File &file, int32_t &openSegment) {
+  if (!gMinuteRingReady || !record || slot >= gMinuteRing.capacity) return false;
+  const uint32_t segment = slot / kMinuteRingSegmentRecords;
+  const uint32_t segmentSlot = slot % kMinuteRingSegmentRecords;
+  if (openSegment != static_cast<int32_t>(segment)) {
+    if (file) file.close();
+    char path[16];
+    minuteRingSegmentPath(segment, path, sizeof(path));
+    file = LittleFS.open(path, "r");
+    openSegment = file ? static_cast<int32_t>(segment) : -1;
+  }
+  if (!file) return false;
+  return file.seek(minuteRingOffset(segmentSlot), SeekSet) &&
+         file.read(reinterpret_cast<uint8_t *>(record), sizeof(*record)) == sizeof(*record);
+}
+
 bool createMinuteRingFile() {
   LittleFS.remove(kMinuteRingPath);
   LittleFS.remove(kLegacyMinuteRingPath);
@@ -1118,6 +1379,25 @@ bool initMinuteRing() {
   if (!valid) gStorageFailures++;
   gPersistedSamples = gMinuteRing.totalWrites;
   return valid;
+}
+
+bool clearMinuteLog() {
+  if (!gFsReady) return false;
+  gMinuteAgg = MinuteAggregate();
+  gHistoryHead = 0;
+  gHistoryCount = 0;
+  gSampleSeq = 0;
+  gLastSampleMs = 0;
+  gLastPersistDurationMs = 0;
+  gMaxPersistDurationMs = 0;
+  const bool ok = createMinuteRingFile();
+  gMinuteRingReady = ok;
+  if (ok) {
+    gPersistedSamples = 0;
+  } else {
+    gStorageFailures++;
+  }
+  return ok;
 }
 
 bool appendMinuteRecord(const MinuteRingRecord &record) {
@@ -1180,7 +1460,7 @@ bool appendMinuteAggregate() {
 }
 
 void updateMinuteAggregate(const SampleRow &row) {
-  const uint32_t minute = row.uptimeMs / 60000UL;
+  const uint32_t minute = currentMinuteKey();
   if (gMinuteAgg.count == 0) {
     resetMinuteAggregate(minute);
   } else if (minute != gMinuteAgg.minute) {
@@ -1617,6 +1897,8 @@ String statusJson() {
   json += ",";
   appendMeaning(json, "lux", luxLevel(), luxMeaning);
   json += "}";
+  json += ",";
+  appendTimeStatus(json);
   json += ",\"config\":{\"power_mode\":\"";
   json += powerModeName();
   json += "\",\"fast_interval_ms\":";
@@ -1685,6 +1967,10 @@ String statusJson() {
   json += String(getCpuFrequencyMhz());
   json += ",\"sleep_eligible\":";
   json += sleepEligible() ? "true" : "false";
+  json += ",\"web_boost_active\":";
+  json += webBoostActive() ? "true" : "false";
+  json += ",\"web_boost_until_ms\":";
+  json += String(gWebBoostUntilMs);
   json += "}";
   json += ",\"sensor_options\":{\"sht41\":{\"current\":\"";
   json += shtPrecisionName();
@@ -1856,14 +2142,19 @@ void sendMinuteHistory(uint32_t maxRows) {
   server.sendContent(String(kMinuteRingCapacity));
   server.sendContent(",\"rows\":[");
 
+  const uint32_t startSlot = (gMinuteRing.writeIndex + gMinuteRing.capacity - gMinuteRing.count) % gMinuteRing.capacity;
+  File segmentFile;
+  int32_t openSegment = -1;
   for (uint32_t i = 0; i < ringRows; i++) {
     MinuteRingRecord record;
-    if (logicalRow++ < skipRows || !readMinuteRingRecord(i, &record)) continue;
+    const uint32_t slot = (startSlot + i) % gMinuteRing.capacity;
+    if (logicalRow++ < skipRows || !readMinuteRingSlotCached(slot, &record, segmentFile, openSegment)) continue;
     if (!first) server.sendContent(",");
     first = false;
     server.sendContent(minuteRecordJson(record));
     if ((i & 0x1F) == 0) yield();
   }
+  if (segmentFile) segmentFile.close();
 
   if (hasCurrent) {
     MinuteRingRecord record;
@@ -1877,6 +2168,7 @@ void sendMinuteHistory(uint32_t maxRows) {
 }
 
 void handleHistory() {
+  noteWebActivity();
   if (server.hasArg("range")) {
     const String range = server.arg("range");
     uint32_t rows = 0;
@@ -1889,6 +2181,7 @@ void handleHistory() {
 }
 
 void handleConfig() {
+  noteWebActivity();
   if (server.method() == HTTP_POST) {
     uint32_t value = 0;
     float fvalue = 0.0f;
@@ -1955,6 +2248,7 @@ void handleConfig() {
 }
 
 void handleConfigReset() {
+  noteWebActivity();
   cfg = EnvConfig();
   normalizeConfig();
   setBacklight(true);
@@ -1966,7 +2260,49 @@ void handleConfigReset() {
   server.send(saved ? 200 : 500, "application/json; charset=utf-8", saved ? "{\"reset\":true,\"saved\":true}" : "{\"reset\":true,\"saved\":false}");
 }
 
+void handleLogClear() {
+  noteWebActivity();
+  if (server.method() != HTTP_POST) {
+    server.send(405, "text/plain", "POST required");
+    return;
+  }
+  if (server.arg("confirm") != "1") {
+    server.send(400, "text/plain", "confirm=1 required");
+    return;
+  }
+  const bool cleared = clearMinuteLog();
+  String json = "{\"cleared\":";
+  json += cleared ? "true" : "false";
+  json += ",\"ring_ready\":";
+  json += gMinuteRingReady ? "true" : "false";
+  json += ",\"minute_rows\":";
+  json += String((gMinuteRingReady ? gMinuteRing.count : 0) + (gMinuteAgg.count > 0 ? 1UL : 0UL));
+  json += "}";
+  server.send(cleared ? 200 : 500, "application/json; charset=utf-8", json);
+}
+
+void handlePerformanceBoost() {
+  if (server.method() != HTTP_POST) {
+    server.send(405, "text/plain", "POST required");
+    return;
+  }
+  uint32_t durationMs = kDefaultWebBoostMs;
+  if (server.hasArg("duration_ms")) {
+    durationMs = static_cast<uint32_t>(server.arg("duration_ms").toInt());
+  }
+  noteWebActivity(durationMs);
+  String json = "{\"boosted\":true,\"web_boost_active\":";
+  json += webBoostActive() ? "true" : "false";
+  json += ",\"web_boost_until_ms\":";
+  json += String(gWebBoostUntilMs);
+  json += ",\"wifi_sta_sleep_effective\":";
+  json += (cfg.wifiStaSleep && !webBoostActive()) ? "true" : "false";
+  json += "}";
+  server.send(200, "application/json; charset=utf-8", json);
+}
+
 void handleHealth() {
+  noteWebActivity();
   String json;
   json.reserve(360);
   const uint32_t minuteRows = (gMinuteRingReady ? gMinuteRing.count : 0) + (gMinuteAgg.count > 0 ? 1UL : 0UL);
@@ -2006,11 +2342,14 @@ void handleHealth() {
   json += String(getCpuFrequencyMhz());
   json += ",\"sleep_eligible\":";
   json += sleepEligible() ? "true" : "false";
+  json += ",\"web_boost_active\":";
+  json += webBoostActive() ? "true" : "false";
   json += "}";
   server.send(200, "application/json; charset=utf-8", json);
 }
 
 void handleLogDownload() {
+  noteWebActivity();
   if (!gFsReady || !gMinuteRingReady) {
     server.send(503, "text/plain", "minute ring not ready");
     return;
@@ -2018,13 +2357,18 @@ void handleLogDownload() {
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "text/csv; charset=utf-8", "");
   server.sendContent("minute,count,co2_ppm,temp_c,humidity_pct,voc_index,nox_index,lux,ok_ratio\n");
+  const uint32_t startSlot = (gMinuteRing.writeIndex + gMinuteRing.capacity - gMinuteRing.count) % gMinuteRing.capacity;
+  File segmentFile;
+  int32_t openSegment = -1;
   for (uint32_t i = 0; i < gMinuteRing.count; i++) {
     MinuteRingRecord record;
-    if (readMinuteRingRecord(i, &record)) {
+    const uint32_t slot = (startSlot + i) % gMinuteRing.capacity;
+    if (readMinuteRingSlotCached(slot, &record, segmentFile, openSegment)) {
       server.sendContent(minuteRecordCsv(record));
     }
     if ((i & 0x1F) == 0) yield();
   }
+  if (segmentFile) segmentFile.close();
   MinuteRingRecord current;
   if (currentMinuteRecord(&current)) {
     server.sendContent(minuteRecordCsv(current));
@@ -2037,10 +2381,135 @@ const char *qualityText(const char *level) {
   return "正常";
 }
 
+const char *menuTitle() {
+  switch (gMenuIndex) {
+    case MENU_POWER: return "模式";
+    case MENU_LCD_BRIGHTNESS: return "背光";
+    case MENU_BACKLIGHT_TIMEOUT: return "熄屏";
+    case MENU_WIFI_SLEEP: return "WiFi省电";
+    case MENU_SHT_PRECISION: return "SHT精度";
+    case MENU_BH_MODE: return "BH模式";
+    case MENU_WEB_BOOST: return "网页加速";
+    default: return "保存退出";
+  }
+}
+
+const char *menuValueText() {
+  switch (gMenuIndex) {
+    case MENU_POWER:
+      if (cfg.powerMode == POWER_LOW) return "低功耗";
+      if (cfg.powerMode == POWER_PERFORMANCE) return "性能";
+      return "均衡";
+    case MENU_LCD_BRIGHTNESS:
+      if (cfg.lcdBrightnessPct <= 20) return "15%";
+      if (cfg.lcdBrightnessPct <= 55) return "50%";
+      if (cfg.lcdBrightnessPct <= 85) return "80%";
+      return "100%";
+    case MENU_BACKLIGHT_TIMEOUT:
+      if (cfg.backlightTimeoutMs <= 5000UL) return "5秒";
+      if (cfg.backlightTimeoutMs <= 30000UL) return "30秒";
+      if (cfg.backlightTimeoutMs <= 60000UL) return "60秒";
+      return "5分钟";
+    case MENU_WIFI_SLEEP:
+      return cfg.wifiStaSleep ? "开启" : "关闭";
+    case MENU_SHT_PRECISION:
+      if (cfg.shtPrecision == 2) return "高";
+      if (cfg.shtPrecision == 1) return "中";
+      return "低";
+    case MENU_BH_MODE:
+      if (cfg.bhMode == 2) return "低分辨";
+      if (cfg.bhMode == 1) return "0.5lx";
+      return "1lx";
+    case MENU_WEB_BOOST:
+      return webBoostActive() ? "已开启" : "关闭";
+    default:
+      return "长按保存";
+  }
+}
+
+void applyMenuSelection() {
+  switch (gMenuIndex) {
+    case MENU_POWER:
+      cfg.powerMode = (cfg.powerMode + 1) % 3;
+      applyPowerRuntimeConfig();
+      break;
+    case MENU_LCD_BRIGHTNESS:
+      if (cfg.lcdBrightnessPct <= 20) cfg.lcdBrightnessPct = 50;
+      else if (cfg.lcdBrightnessPct <= 55) cfg.lcdBrightnessPct = 80;
+      else if (cfg.lcdBrightnessPct <= 85) cfg.lcdBrightnessPct = 100;
+      else cfg.lcdBrightnessPct = 15;
+      setBacklight(true);
+      break;
+    case MENU_BACKLIGHT_TIMEOUT:
+      if (cfg.backlightTimeoutMs <= 5000UL) cfg.backlightTimeoutMs = 30000UL;
+      else if (cfg.backlightTimeoutMs <= 30000UL) cfg.backlightTimeoutMs = 60000UL;
+      else if (cfg.backlightTimeoutMs <= 60000UL) cfg.backlightTimeoutMs = 300000UL;
+      else cfg.backlightTimeoutMs = 5000UL;
+      break;
+    case MENU_WIFI_SLEEP:
+      cfg.wifiStaSleep = !cfg.wifiStaSleep;
+      applyPowerRuntimeConfig();
+      break;
+    case MENU_SHT_PRECISION:
+      cfg.shtPrecision = (cfg.shtPrecision + 1) % 3;
+      break;
+    case MENU_BH_MODE:
+      cfg.bhMode = (cfg.bhMode + 1) % 3;
+      if (env.bhOnline && !gBh1750.configure(currentBhMode())) env.bhFail++;
+      break;
+    case MENU_WEB_BOOST:
+      noteWebActivity(kDefaultWebBoostMs);
+      break;
+    default:
+      break;
+  }
+  normalizeConfig();
+  gForceDisplayDraw = true;
+}
+
+void saveMenuConfig() {
+  normalizeConfig();
+  applyPowerRuntimeConfig();
+  if (env.bhOnline && !gBh1750.configure(currentBhMode())) env.bhFail++;
+  saveConfig();
+}
+
+void handleShortPress() {
+  noteUserActivity();
+  if (!gMenuMode) {
+    gDisplayPage = (gDisplayPage + 1) % kDisplayPageCount;
+  } else if (gMenuEditing) {
+    applyMenuSelection();
+  } else {
+    gMenuIndex = (gMenuIndex + 1) % MENU_COUNT;
+  }
+  gForceDisplayDraw = true;
+}
+
+void handleLongPress() {
+  noteUserActivity();
+  if (!gMenuMode) {
+    gMenuMode = true;
+    gMenuEditing = false;
+    gMenuIndex = 0;
+  } else if (gMenuIndex == MENU_SAVE_EXIT) {
+    saveMenuConfig();
+    gMenuMode = false;
+    gMenuEditing = false;
+  } else if (gMenuEditing) {
+    saveMenuConfig();
+    gMenuEditing = false;
+  } else {
+    gMenuEditing = true;
+  }
+  gForceDisplayDraw = true;
+}
+
 void handleButtonIfDue() {
   static int lastStable = HIGH;
   static int lastRead = HIGH;
   static unsigned long lastChange = 0;
+  static unsigned long pressStart = 0;
   const int nowRead = digitalRead(static_cast<int>(kBootKey));
   const unsigned long now = millis();
   if (nowRead != lastRead) {
@@ -2051,11 +2520,27 @@ void handleButtonIfDue() {
   if (nowRead != lastStable) {
     lastStable = nowRead;
     if (lastStable == LOW) {
-      noteUserActivity();
-      gDisplayPage = (gDisplayPage + 1) % kDisplayPageCount;
-      gForceDisplayDraw = true;
+      pressStart = now;
+    } else {
+      const ButtonEvent event = (now - pressStart >= kButtonLongPressMs) ? BUTTON_LONG : BUTTON_SHORT;
+      if (event == BUTTON_LONG) handleLongPress();
+      else if (event == BUTTON_SHORT) handleShortPress();
     }
   }
+}
+
+void drawLcdHeader(const char *title);
+
+void drawSettingsMenu() {
+  drawLcdHeader("设置");
+  char line[32];
+  snprintf(line, sizeof(line), "%u/%u", static_cast<unsigned int>(gMenuIndex + 1), static_cast<unsigned int>(MENU_COUNT));
+  lcdText(4, 16, line, kYellow, kPanel, 1);
+  lcdTextUtf8(38, 16, menuTitle(), kWhite, kPanel);
+  lcdTextUtf8(4, 32, gMenuEditing ? "编辑" : "选择", gMenuEditing ? kOrange : kCyan, kPanel);
+  lcdTextUtf8(54, 32, menuValueText(), gMenuEditing ? kOrange : kGreen, kPanel);
+  lcdTextUtf8(4, 50, gMenuEditing ? "短按切换" : "短按下一项", kWhite, kPanel);
+  lcdTextUtf8(4, 66, gMenuEditing ? "长按保存" : "长按进入/退出", kWhite, kPanel);
 }
 
 void drawLcdHeader(const char *title) {
@@ -2076,7 +2561,9 @@ void drawDisplayIfDue() {
   lcdFill(0, 0, kLcdWidth - 1, kLcdHeight - 1, kPanel);
   char line[32];
 
-  if (gDisplayPage == 0) {
+  if (gMenuMode) {
+    drawSettingsMenu();
+  } else if (gDisplayPage == 0) {
     drawLcdHeader("主看板");
     lcdTextUtf8(4, 16, "二氧化碳", kYellow, kPanel);
     snprintf(line, sizeof(line), "%uppm", env.scdCo2);
@@ -2171,14 +2658,16 @@ void printStatusIfDue() {
 }
 
 void setupServer() {
-  server.on("/", HTTP_GET, []() { server.send_P(200, "text/html; charset=utf-8", kIndexHtml); });
-  server.on("/api/status", HTTP_GET, []() { server.send(200, "application/json; charset=utf-8", statusJson()); });
-  server.on("/api/live", HTTP_GET, []() { server.send(200, "application/json; charset=utf-8", statusJson()); });
+  server.on("/", HTTP_GET, []() { noteWebActivity(); server.send_P(200, "text/html; charset=utf-8", kIndexHtml); });
+  server.on("/api/status", HTTP_GET, []() { noteWebActivity(); server.send(200, "application/json; charset=utf-8", statusJson()); });
+  server.on("/api/live", HTTP_GET, []() { noteWebActivity(); server.send(200, "application/json; charset=utf-8", statusJson()); });
   server.on("/api/history", HTTP_GET, handleHistory);
   server.on("/api/health", HTTP_GET, handleHealth);
   server.on("/api/config", HTTP_ANY, handleConfig);
   server.on("/api/config/reset", HTTP_POST, handleConfigReset);
   server.on("/api/log.csv", HTTP_GET, handleLogDownload);
+  server.on("/api/log/clear", HTTP_POST, handleLogClear);
+  server.on("/api/performance/boost", HTTP_POST, handlePerformanceBoost);
   server.begin();
 }
 
@@ -2203,7 +2692,7 @@ void setupWifi() {
 
 void applyPowerRuntimeConfig() {
   applyCpuPowerMode();
-  WiFi.setSleep(cfg.wifiStaSleep);
+  WiFi.setSleep(cfg.wifiStaSleep && !webBoostActive());
   if (lowPowerStaOnly()) {
     WiFi.softAPdisconnect(true);
     WiFi.mode(WIFI_STA);
@@ -2214,6 +2703,7 @@ void applyPowerRuntimeConfig() {
     if (strlen(kStaSsid) > 0 && WiFi.status() != WL_CONNECTED) WiFi.begin(kStaSsid, kStaPass);
   }
   setBacklight(gBacklightOn);
+  gLastAppliedWebBoost = webBoostActive();
 }
 
 void handleWifiReliability() {
@@ -2248,6 +2738,8 @@ void setup() {
 
   initSensors();
   setupServer();
+  noteWebActivity(kDefaultWebBoostMs);
+  maintainTimeSync();
   readSensorsIfDue();
 
   Serial.printf("[NET] AP=%s IP=%s\n", kApSsid, ipString().c_str());
@@ -2264,6 +2756,8 @@ void loop() {
   gLastLoopMs = now;
   server.handleClient();
   handleWifiReliability();
+  maintainTimeSync();
+  maintainWebBoostPower();
   handleButtonIfDue();
   handleBacklightTimeout();
   readSensorsIfDue();

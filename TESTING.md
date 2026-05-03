@@ -22,6 +22,7 @@ Host-only tests:
 ```powershell
 python .\tools\test_ring_log.py
 python .\tools\test_power_config.py
+python .\tools\test_dashboard_contract.py
 ```
 
 Power measurement:
@@ -58,6 +59,14 @@ The smoke test checks:
 - `/api/health` reports OK.
 - `/api/health` reports the minute ring ready.
 - `/api/log.csv` downloads a minute aggregate CSV header and data row.
+- `/api/status.time` exposes NTP/RTC state through `sync_time`, `time_source`,
+  `epoch_s`, and `local_time`.
+- Root HTML uses a browser history cache for minute ranges and exposes 数据清零
+  through `POST /api/log/clear?confirm=1`.
+- Root HTML exposes 网页加速 through `POST /api/performance/boost`, and status
+  exposes `web_boost_active`.
+- BOOT key firmware exposes short/long press handling and an LCD settings menu
+  for core controls.
 - CO2, SHT41 temperature/humidity, and BH1750 lux values are in plausible ranges.
 - Root HTML page is served and includes the trend chart and interpretation panel.
 - Test reports should record the command, endpoint or script used, the observed

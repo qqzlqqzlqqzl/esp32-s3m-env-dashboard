@@ -262,3 +262,86 @@ Notes:
 - Health reported accumulated `loop_stalls`; because `health.ok=true` and
   storage/sensor checks passed, this was recorded as evidence to watch during
   longer soak rather than treated as a move-regression.
+
+## 2026-05-03 Dashboard History Performance And Local Menu Check
+
+Purpose:
+
+- Fix slow HTML range switching after hundreds or thousands of minute records.
+- Add protected data clear, NTP time status, web interaction boost, and BOOT
+  single-button LCD settings controls.
+
+Root cause found:
+
+- The HTML did not already have all minute data locally. Every range click
+  fetched `/api/history?range=<range>` from the ESP32.
+- The ESP32 backend read one minute record by opening a LittleFS file per row.
+  With hundreds of rows this became slow enough that `range=all` and CSV could
+  hit host-side timeouts.
+
+Implemented:
+
+- HTML preloads `/api/history?range=all` into a browser `minuteCache`.
+- Range buttons slice the browser cache locally and chart drawing decimates to
+  `MAX_CHART_POINTS=360`.
+- Backend history/CSV streaming now uses `readMinuteRingSlotCached`, keeping the
+  current segment file open instead of reopening LittleFS per row.
+- Added `POST /api/performance/boost` and a HTML `加速查看` button.
+- Web requests and boot start a temporary boost window. CPU remains low-power
+  capable, but WiFi sleep is disabled while `web_boost_active=true`.
+- Added `POST /api/log/clear?confirm=1` for protected 数据清零. A POST without
+  `confirm=1` rejects and does not delete data.
+- Added NTP/RTC status in `/api/status.time`.
+- Added BOOT short/long press LCD menu contract for power mode, LCD brightness,
+  backlight timeout, WiFi sleep, SHT41 precision, BH1750 mode, and web boost.
+
+Host tests:
+
+- `python .\tools\test_dashboard_contract.py` -> `[PASS] 6 dashboard contract tests`
+- `python .\tools\test_ring_log.py` -> `[PASS] 5 ring log tests`
+- `python .\tools\test_power_config.py` -> `[PASS] 6 power contract tests`
+
+Build/upload:
+
+- Arduino CLI compile passed:
+  - Sketch: `943221 bytes (71%)`
+  - Globals: `78404 bytes (23%)`
+- Arduino CLI upload to `COM20` passed and hash verified.
+
+Hardware/API verification after upload:
+
+- HTTP port 80 reachable after boot boost.
+- `/api/status`:
+  - `ok=true`
+  - I2C: `400000`
+  - SHT41/SCD41/SGP41/BH1750: all online
+  - CO2: `427 ppm`
+  - SHT41: `22.21 C`, `64.2 %RH`
+  - BH1750: `32.5 lx`
+  - NTP/RTC: `sync_time=true`, `time_source=ntp_rtc`,
+    `local_time=2026-05-03 10:35:31`
+- `/api/history?range=all`:
+  - Rows: `707`
+  - Total rows: `707`
+  - Time: `4532 ms`
+- `/api/log.csv`:
+  - Rows: `707`
+  - Time: `2760 ms`
+- `/`:
+  - HTML bytes: `26941`
+  - Time: `332 ms`
+  - Markers present: `数据清零`, `加速查看`, `minuteCache`, `ensureMinuteCache`
+- `/api/performance/boost?duration_ms=60000`:
+  - `boosted=true`
+  - `web_boost_active=true`
+  - `wifi_sta_sleep_effective=false`
+  - Time: `47 ms`
+- `POST /api/log/clear` without confirmation:
+  - HTTP `400 Bad Request`
+  - Data not cleared.
+
+Residual note:
+
+- BOOT long/short press menu is covered by host source contract and compile.
+  Physical button navigation still needs manual observation or a future GPIO
+  injection jig to verify every LCD menu transition end-to-end.

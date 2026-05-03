@@ -13,6 +13,17 @@ Features:
 - Uses a segmented Flash ring buffer: 96 segments x 105 minute records = 10080 minute points
 - Exposes JSON at `/api/status`, `/api/live`, `/api/history`, `/api/health`, `/api/config`
 - Exports CSV at `/api/log.csv`
+- Uses a browser-side history cache so chart range switching does not re-read
+  LittleFS from the ESP32 for every click
+- Provides a 网页加速 button and automatic web interaction boost. While active,
+  the firmware keeps the low-power CPU setting but temporarily disables WiFi
+  sleep so dashboard operations respond faster.
+- Supports explicit `POST /api/log/clear` 数据清零 for history/log reset
+- Uses NTP time sync when STA WiFi is connected and exposes `time_source`,
+  `epoch_s`, and `local_time` in `/api/status`
+- Supports a one-button LCD settings menu on the BOOT key: 短按 wakes or
+  switches pages; 长按 enters settings; in settings, 短按 moves or changes
+  values and 长按 edits/saves/exits.
 - Uses Arduino CLI build and upload flow
 - Tracks the Power optimization contract in `tools/test_power_config.py`
 
@@ -113,6 +124,22 @@ Storage model:
 - `/api/history` without `range` returns recent RAM realtime samples.
 - `/api/history?range=60`, `1440`, `4320`, or `all` returns minute aggregates
   from the Flash ring plus the current in-progress minute.
+- The HTML dashboard fetches `range=all` into a browser history cache once, then
+  switches 1h/6h/1d/3d/all locally and decimates large ranges before drawing.
 - `/api/log.csv` exports minute aggregate CSV, not raw 1-second rows.
+- `POST /api/log/clear?confirm=1` clears the LittleFS minute ring and RAM
+  realtime history, but leaves configuration intact.
 - `/api/status` and `/api/health` expose ring capacity, write count, write
   duration, loop stall count, and WiFi reconnect count for long-run checks.
+- When NTP has synced, new minute records use real epoch minutes; before sync,
+  records use uptime minutes and `/api/status.time.time_source` reports
+  `uptime`.
+
+Local LCD controls:
+
+- Normal mode: BOOT 短按 wakes the LCD and switches dashboard pages.
+- Normal mode: BOOT 长按 enters the settings menu.
+- Settings menu: 短按 moves to the next item; 长按 enters editing.
+- Editing mode: 短按 cycles values, 长按 saves the value.
+- The menu exposes core field controls: power mode, LCD brightness, backlight
+  timeout, WiFi sleep, SHT41 precision, BH1750 mode, and web boost.
