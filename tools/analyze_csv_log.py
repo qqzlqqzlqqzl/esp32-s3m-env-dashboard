@@ -55,10 +55,13 @@ def analyze(path: Path, require_bom: bool = False) -> int:
     ]
     low_count = [row for row in rows if row["count"] < 1.0]
     minute_gaps = []
+    minute_backtracks = []
     for prev, cur in zip(rows, rows[1:]):
         prev_minute = int(prev["minute"])
         cur_minute = int(cur["minute"])
-        if cur_minute != prev_minute + 1:
+        if cur_minute <= prev_minute:
+            minute_backtracks.append((prev_minute, cur_minute))
+        elif cur_minute != prev_minute + 1:
             minute_gaps.append((prev_minute, cur_minute))
 
     print(f"rows={len(rows)}")
@@ -67,12 +70,15 @@ def analyze(path: Path, require_bom: bool = False) -> int:
     print(f"zero_core_rows={len(zero_core)}")
     print(f"low_count_rows={len(low_count)}")
     print(f"minute_gaps={len(minute_gaps)}")
+    print(f"minute_backtracks={len(minute_backtracks)}")
     if zero_lux:
         print("zero_lux_first=" + ",".join(str(int(row["minute"])) for row in zero_lux[:12]))
     if zero_core:
         print("zero_core_first=" + ",".join(str(int(row["minute"])) for row in zero_core[:12]))
     if minute_gaps:
         print("minute_gap_first=" + ",".join(f"{a}->{b}" for a, b in minute_gaps[:12]))
+    if minute_backtracks:
+        print("minute_backtrack_first=" + ",".join(f"{a}->{b}" for a, b in minute_backtracks[:12]))
 
     failed = False
     if require_bom and not has_bom:
@@ -81,8 +87,8 @@ def analyze(path: Path, require_bom: bool = False) -> int:
     if zero_core:
         print("[FAIL] CSV contains zero core sensor rows")
         failed = True
-    if minute_gaps:
-        print("[FAIL] CSV contains non-monotonic or discontinuous minute sequence")
+    if minute_backtracks:
+        print("[FAIL] CSV contains non-monotonic minute sequence")
         failed = True
     if failed:
         return 1

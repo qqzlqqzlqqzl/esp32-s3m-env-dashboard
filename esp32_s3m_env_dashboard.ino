@@ -131,6 +131,7 @@ uint32_t gMaxPersistDurationMs = 0;
 uint32_t gDroppedInvalidSamples = 0;
 uint32_t gDroppedUnsyncedSamples = 0;
 uint32_t gDroppedTimeDomainSamples = 0;
+uint32_t gLastFilteredMinuteRows = 0;
 uint8_t gDisplayPage = 0;
 bool gForceDisplayDraw = true;
 bool gBacklightOn = true;
@@ -1293,7 +1294,7 @@ SampleRow makeSample() {
            isfinite(row.humidity) && row.humidity >= 0.0f && row.humidity <= 100.0f &&
            env.srawVoc > 0 && env.srawNox > 0 &&
            row.voc >= 0 && row.nox >= 0 &&
-           isfinite(row.lux) && row.lux >= 0.0f;
+           isfinite(row.lux) && row.lux > 0.0f;
   return row;
 }
 
@@ -1480,6 +1481,17 @@ bool appendMinuteAggregate() {
 
 bool minuteKeyIsEpoch(uint32_t minute) {
   return minute >= kEpochMinuteFloor;
+}
+
+bool minuteRecordHasUsableValues(const MinuteRingRecord &record) {
+  return record.count > 0 &&
+         record.okPermille > 0 &&
+         record.co2 > 0.0f &&
+         isfinite(record.tempC) && record.tempC > -40.0f && record.tempC < 85.0f &&
+         isfinite(record.humidity) && record.humidity > 0.0f && record.humidity <= 100.0f &&
+         isfinite(record.voc) && record.voc > 0.0f &&
+         isfinite(record.nox) && record.nox >= 0.0f &&
+         isfinite(record.lux) && record.lux > 0.0f;
 }
 
 bool shouldHoldLoggingForTimeSync() {
@@ -2055,6 +2067,8 @@ String statusJson() {
   json += String(gDroppedUnsyncedSamples);
   json += ",\"dropped_time_domain_samples\":";
   json += String(gDroppedTimeDomainSamples);
+  json += ",\"last_filtered_minute_rows\":";
+  json += String(gLastFilteredMinuteRows);
   json += ",\"used_bytes\":";
   json += gFsReady ? String(LittleFS.usedBytes()) : "0";
   json += ",\"total_bytes\":";
@@ -2223,12 +2237,52 @@ void minuteRecordCsvLine(const MinuteRingRecord &record, char *out, size_t outSi
            static_cast<float>(record.okPermille) / 1000.0f);
 }
 
+struct MinuteExportStats {
+  uint32_t rawRows = 0;
+  uint32_t usableRows = 0;
+  uint32_t epochUsableRows = 0;
+  uint32_t exportedRows = 0;
+  uint32_t filteredRows = 0;
+  bool preferEpoch = false;
+};
+
+MinuteExportStats computeMinuteExportStats() {
+  MinuteExportStats stats;
+  stats.rawRows = (gMinuteRingReady ? gMinuteRing.count : 0) + (gMinuteAgg.count > 0 ? 1UL : 0UL);
+  const uint32_t startSlot = (gMinuteRing.writeIndex + gMinuteRing.capacity - gMinuteRing.count) % gMinuteRing.capacity;
+  File segmentFile;
+  int32_t openSegment = -1;
+  for (uint32_t i = 0; i < gMinuteRing.count; i++) {
+    MinuteRingRecord record;
+    const uint32_t slot = (startSlot + i) % gMinuteRing.capacity;
+    if (readMinuteRingSlotCached(slot, &record, segmentFile, openSegment) && minuteRecordHasUsableValues(record)) {
+      stats.usableRows++;
+      if (minuteKeyIsEpoch(record.minute)) stats.epochUsableRows++;
+    }
+    if ((i & 0x3F) == 0) yield();
+  }
+  if (segmentFile) segmentFile.close();
+  MinuteRingRecord current;
+  if (currentMinuteRecord(&current) && minuteRecordHasUsableValues(current)) {
+    stats.usableRows++;
+    if (minuteKeyIsEpoch(current.minute)) stats.epochUsableRows++;
+  }
+  stats.preferEpoch = stats.epochUsableRows > 0;
+  if (stats.preferEpoch) stats.usableRows = stats.epochUsableRows;
+  stats.filteredRows = stats.rawRows > stats.usableRows ? stats.rawRows - stats.usableRows : 0;
+  return stats;
+}
+
+bool minuteRecordExportable(const MinuteRingRecord &record, const MinuteExportStats &stats) {
+  if (!minuteRecordHasUsableValues(record)) return false;
+  return !stats.preferEpoch || minuteKeyIsEpoch(record.minute);
+}
+
 void sendMinuteHistory(uint32_t maxRows) {
+  MinuteExportStats stats = computeMinuteExportStats();
   const uint32_t ringRows = gMinuteRingReady ? gMinuteRing.count : 0;
-  const bool hasCurrent = gMinuteAgg.count > 0;
-  const uint32_t totalRows = ringRows + (hasCurrent ? 1UL : 0UL);
-  const uint32_t skipRows = (maxRows > 0 && totalRows > maxRows) ? totalRows - maxRows : 0;
-  uint32_t logicalRow = 0;
+  const uint32_t skipRows = (maxRows > 0 && stats.usableRows > maxRows) ? stats.usableRows - maxRows : 0;
+  uint32_t usableRow = 0;
   bool first = true;
 
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
@@ -2236,8 +2290,10 @@ void sendMinuteHistory(uint32_t maxRows) {
   char outBuffer[2048];
   char line[224];
   size_t outUsed = 0;
-  snprintf(line, sizeof(line), "{\"source\":\"minute\",\"total_rows\":%lu,\"capacity\":%lu,\"rows\":[",
-           static_cast<unsigned long>(totalRows),
+  snprintf(line, sizeof(line), "{\"source\":\"minute\",\"total_rows\":%lu,\"raw_rows\":%lu,\"filtered_rows\":%lu,\"capacity\":%lu,\"rows\":[",
+           static_cast<unsigned long>(stats.usableRows),
+           static_cast<unsigned long>(stats.rawRows),
+           static_cast<unsigned long>(stats.rawRows > stats.usableRows ? stats.rawRows - stats.usableRows : 0),
            static_cast<unsigned long>(kMinuteRingCapacity));
   appendBufferedContent(line, outBuffer, sizeof(outBuffer), outUsed);
 
@@ -2247,7 +2303,8 @@ void sendMinuteHistory(uint32_t maxRows) {
   for (uint32_t i = 0; i < ringRows; i++) {
     MinuteRingRecord record;
     const uint32_t slot = (startSlot + i) % gMinuteRing.capacity;
-    if (logicalRow++ < skipRows || !readMinuteRingSlotCached(slot, &record, segmentFile, openSegment)) continue;
+    if (!readMinuteRingSlotCached(slot, &record, segmentFile, openSegment) || !minuteRecordExportable(record, stats)) continue;
+    if (usableRow++ < skipRows) continue;
     if (!first) appendBufferedContent(",", outBuffer, sizeof(outBuffer), outUsed);
     first = false;
     minuteRecordJsonLine(record, line, sizeof(line));
@@ -2256,15 +2313,18 @@ void sendMinuteHistory(uint32_t maxRows) {
   }
   if (segmentFile) segmentFile.close();
 
-  if (hasCurrent) {
-    MinuteRingRecord record;
-    if (logicalRow >= skipRows && currentMinuteRecord(&record)) {
+  MinuteRingRecord record;
+  if (currentMinuteRecord(&record) && minuteRecordExportable(record, stats)) {
+    if (usableRow >= skipRows) {
       if (!first) appendBufferedContent(",", outBuffer, sizeof(outBuffer), outUsed);
       minuteRecordJsonLine(record, line, sizeof(line));
       appendBufferedContent(line, outBuffer, sizeof(outBuffer), outUsed);
     }
+    usableRow++;
   }
 
+  stats.exportedRows = usableRow > skipRows ? usableRow - skipRows : 0;
+  gLastFilteredMinuteRows = stats.rawRows > stats.exportedRows ? stats.rawRows - stats.exportedRows : 0;
   appendBufferedContent("]}", outBuffer, sizeof(outBuffer), outUsed);
   flushBufferedContent(outBuffer, outUsed);
 }
@@ -2461,6 +2521,7 @@ void handleLogDownload() {
   char outBuffer[2048];
   char line[128];
   size_t outUsed = 0;
+  MinuteExportStats stats = computeMinuteExportStats();
   appendBufferedContent("\xEF\xBB\xBFminute,count,co2_ppm,temp_c,humidity_pct,voc_index,nox_index,lux,ok_ratio\n", outBuffer, sizeof(outBuffer), outUsed);
   const uint32_t startSlot = (gMinuteRing.writeIndex + gMinuteRing.capacity - gMinuteRing.count) % gMinuteRing.capacity;
   File segmentFile;
@@ -2468,18 +2529,21 @@ void handleLogDownload() {
   for (uint32_t i = 0; i < gMinuteRing.count; i++) {
     MinuteRingRecord record;
     const uint32_t slot = (startSlot + i) % gMinuteRing.capacity;
-    if (readMinuteRingSlotCached(slot, &record, segmentFile, openSegment)) {
+    if (readMinuteRingSlotCached(slot, &record, segmentFile, openSegment) && minuteRecordExportable(record, stats)) {
       minuteRecordCsvLine(record, line, sizeof(line));
       appendBufferedContent(line, outBuffer, sizeof(outBuffer), outUsed);
+      stats.exportedRows++;
     }
     if ((i & 0x1F) == 0) yield();
   }
   if (segmentFile) segmentFile.close();
   MinuteRingRecord current;
-  if (currentMinuteRecord(&current)) {
+  if (currentMinuteRecord(&current) && minuteRecordExportable(current, stats)) {
     minuteRecordCsvLine(current, line, sizeof(line));
     appendBufferedContent(line, outBuffer, sizeof(outBuffer), outUsed);
+    stats.exportedRows++;
   }
+  gLastFilteredMinuteRows = stats.rawRows > stats.exportedRows ? stats.rawRows - stats.exportedRows : 0;
   flushBufferedContent(outBuffer, outUsed);
 }
 

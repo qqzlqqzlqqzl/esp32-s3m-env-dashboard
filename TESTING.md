@@ -33,7 +33,9 @@ python .\tools\analyze_csv_log.py "C:\Users\lyl\Downloads\log (1).csv" --require
 ```
 
 This check fails if the export lacks the UTF-8 BOM needed for reliable Excel
-opening, contains zero core sensor rows, or mixes/discontinues minute keys.
+opening, contains zero core sensor rows, or has non-monotonic minute keys. Gaps
+are reported because old dirty rows may be filtered out, but gaps alone do not
+fail the export.
 
 Hardware read-only perf check (no `/api/config`, no data clear):
 

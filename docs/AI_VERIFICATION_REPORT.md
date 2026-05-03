@@ -603,3 +603,48 @@ Important residual:
 - Existing dirty records remain in LittleFS until the user explicitly approves
   `POST /api/log/clear?confirm=1`. The fix prevents new dirty samples from being
   added; it does not rewrite old Flash history in place.
+
+## 2026-05-03 Read-Side Dirty Log Filtering (18:03 +08:00)
+
+Problem:
+
+- The previous fix stopped new dirty samples but default `/api/log.csv` still
+  exported old dirty LittleFS rows unless the user explicitly cleared history.
+- Clearing is destructive, so the default read path needed to filter old dirty
+  rows without deleting Flash data.
+
+Fix:
+
+- Added `minuteRecordHasUsableValues`, `computeMinuteExportStats`, and
+  `minuteRecordExportable`.
+- `/api/history?range=...` and `/api/log.csv` now skip old persisted rows with
+  zero core values, zero lux, invalid numeric ranges, or stale uptime-minute
+  keys when NTP epoch-minute rows exist.
+- `/api/status.storage.last_filtered_minute_rows` exposes how many raw rows were
+  hidden by the read-side filter in the latest history/CSV export.
+- `tools/analyze_csv_log.py` now fails non-monotonic minute keys but only reports
+  gaps, because gaps are expected when old dirty rows are filtered instead of
+  deleted.
+
+Verification:
+
+- `python .\tools\test_dashboard_contract.py` -> `[PASS] 8 dashboard contract tests`
+- `python .\tools\test_ring_log.py` -> `[PASS] 5 ring log tests`
+- `python .\tools\test_power_config.py` -> `[PASS] 6 power contract tests`
+- Arduino CLI compile from `$env:TEMP\esp32mini-arduino-build-filterfix` -> pass:
+  sketch `943917` bytes (`72%`), globals `78420` bytes (`23%`)
+- Upload to `COM20` -> pass, all flash writes hash verified.
+- `.\tools\http_perf_check.ps1 -Port COM20 -SerialSeconds 18 -WithBoost` -> PASS:
+  `/api/history?range=all` `1633 ms` for `376` filtered rows,
+  `/api/log.csv` `1486 ms`, `/` `142 ms`, protected clear `HTTP 400`.
+- Downloaded `_verify_filtered_log.csv` first bytes: `EF BB BF`.
+- `python .\tools\analyze_csv_log.py .\_verify_filtered_log.csv --require-bom`:
+  - `rows=376`
+  - `utf8_bom=True`
+  - `zero_lux_rows=0`
+  - `zero_core_rows=0`
+  - `minute_backtracks=0`
+  - Result: `[PASS] CSV log analysis passed`
+- `/api/status.storage`: raw ring count `1147`,
+  `last_filtered_minute_rows=771`, `dropped_invalid_samples=6`,
+  `dropped_unsynced_samples=1`.

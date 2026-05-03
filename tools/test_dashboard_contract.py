@@ -135,11 +135,16 @@ def test_log_export_quality_guards() -> None:
     assert_contains(make_sample, "row.co2 > 0", "sample validity should reject zero CO2")
     assert_contains(make_sample, "env.srawVoc > 0", "sample validity should reject empty SGP raw VOC")
     assert_contains(make_sample, "env.srawNox > 0", "sample validity should reject empty SGP raw NOx")
+    assert_contains(make_sample, "row.lux) && row.lux > 0.0f", "sample validity should reject zero lux for persisted logs")
     assert_contains(publish_sample, "shouldHoldLoggingForTimeSync", "logging should wait for real time when STA is configured")
     assert_contains(publish_sample, "gDroppedUnsyncedSamples", "unsynced drops should be counted")
     assert_contains(publish_sample, "gDroppedInvalidSamples", "invalid drops should be counted")
     assert_contains(update_aggregate, "minuteKeyIsEpoch", "minute aggregation should detect time-domain switches")
     assert_contains(update_aggregate, "gDroppedTimeDomainSamples", "time-domain drops should be counted")
+    assert_contains(source, "minuteRecordHasUsableValues", "read path should filter dirty historical minute records")
+    assert_contains(source, "computeMinuteExportStats", "history export should pre-count filtered records")
+    assert_contains(source, "minuteRecordExportable", "history export should skip old uptime records when epoch data exists")
+    assert_contains(source, "last_filtered_minute_rows", "status should expose read-side filtering")
     for token in ["dropped_invalid_samples", "dropped_unsynced_samples", "dropped_time_domain_samples"]:
         assert_contains(status_json, token, "statusJson should expose dropped sample counters")
     for token in ["gDroppedInvalidSamples", "gDroppedUnsyncedSamples", "gDroppedTimeDomainSamples"]:
