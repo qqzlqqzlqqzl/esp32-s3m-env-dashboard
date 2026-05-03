@@ -689,6 +689,39 @@ Independent verification by subagent:
 
 No log clear was performed.
 
+## 2026-05-03 Backlog Curator Protocol (18:56 +08:00)
+
+Purpose:
+
+- Convert issue #10 into a durable AI-readable protocol so the main agent does
+  not silently close its own work without independent evidence.
+
+Change:
+
+- Added `docs/AI_BACKLOG_PROTOCOL.md`.
+- Updated `docs/AI_DOC_INDEX.md` and `README.md` to point future agents to the
+  protocol.
+
+Protocol summary:
+
+- Main agent may create issues, implement fixes, and comment evidence.
+- Main agent must not close an issue it implemented unless an independent
+  curator/verifier has reviewed the evidence.
+- Curator may close issues only after comparing acceptance criteria against
+  committed code, docs, tests, and hardware evidence.
+- Every issue should include priority, context, acceptance criteria,
+  reproduction or verification commands, and residual risk.
+- Every closure comment should include commit hash, commands run, hardware
+  target when relevant, destructive-endpoint status, and residual risk.
+- Destructive confirmed log clear, 24h/72h soak, and physical BOOT/LCD
+  verification stay open until their specific safe test window exists.
+
+Verification:
+
+- Markdown/docs-only change reviewed by diff.
+- Protocol was immediately used in this session: issues #1, #2, and #3 were
+  closed by curator subagents rather than by the main implementing agent.
+
 ## 2026-05-03 NTP And Minute Continuity Gate (18:53 +08:00)
 
 Purpose:

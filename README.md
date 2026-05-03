@@ -37,6 +37,7 @@ AI documentation:
 - Test closure: `docs/AI_TEST_CLOSURE_RUNBOOK.md`
 - Storage notes: `docs/AI_STORAGE_RING_NOTES.md`
 - Power measurements: `docs/AI_POWER_MEASUREMENT_LOG.md`
+- Backlog/issue closure protocol: `docs/AI_BACKLOG_PROTOCOL.md`
 - Cross-project lessons: `docs/AI_CROSS_PROJECT_LESSONS.md`
 - Known mistakes: `docs/AI_ERROR_LESSONS.md`
 
