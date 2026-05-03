@@ -118,9 +118,11 @@ Invoke-Step "Host tests" {
   if ($LASTEXITCODE -ne 0) { throw "test_ring_log.py failed" }
   python .\tools\test_power_config.py
   if ($LASTEXITCODE -ne 0) { throw "test_power_config.py failed" }
+  python .\tools\test_power_regression_check.py
+  if ($LASTEXITCODE -ne 0) { throw "test_power_regression_check.py failed" }
   python .\tools\test_health_verdict.py
   if ($LASTEXITCODE -ne 0) { throw "test_health_verdict.py failed" }
-  python -m py_compile .\tools\measure_ch1_current.py .\tools\analyze_csv_log.py .\tools\health_verdict.py
+  python -m py_compile .\tools\measure_ch1_current.py .\tools\analyze_csv_log.py .\tools\health_verdict.py .\tools\power_regression_check.py
   if ($LASTEXITCODE -ne 0) { throw "py_compile failed" }
   [scriptblock]::Create((Get-Content -Raw .\tools\http_perf_check.ps1)) | Out-Null
 }
@@ -157,7 +159,7 @@ if ([string]::IsNullOrWhiteSpace($Ip)) {
 
 if (-not $SkipPower) {
   Invoke-Step "SmartUSBHub CH1 current sample" {
-    python .\tools\measure_ch1_current.py --port $SmartUsbPort --channel 1 --samples $PowerSamples --interval 0.25
+    python .\tools\power_regression_check.py --mode boost --port $SmartUsbPort --channel 1 --samples $PowerSamples --interval 0.25
     if ($LASTEXITCODE -ne 0) { throw "power measurement failed" }
   } -WarnOnly
 }

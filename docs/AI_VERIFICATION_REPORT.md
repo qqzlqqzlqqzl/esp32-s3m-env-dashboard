@@ -689,6 +689,55 @@ Independent verification by subagent:
 
 No log clear was performed.
 
+## 2026-05-03 SmartUSBHub Power Regression Gate (18:43 +08:00)
+
+Purpose:
+
+- Convert CH1 current sampling into a threshold-based regression gate for issue
+  #6, instead of relying on manual interpretation of one-off current numbers.
+
+Change:
+
+- Added `tools/power_regression_check.py`.
+- Added `tools/test_power_regression_check.py` with offline JSON fixtures.
+- `tools/hourly_qa_patrol.ps1` now uses `power_regression_check.py --mode boost`
+  for the active browser/boost patrol window.
+- `TESTING.md` documents idle and boost power gate commands.
+
+Thresholds:
+
+- `idle`: default target `75 mA`; over target returns non-zero.
+- `boost`: default target `160 mA`; intended for active web viewing and
+  temporary WiFi boost windows.
+- `backlight`: default target `180 mA`; reserved for LCD/backlight-awake windows.
+
+Independent subagent verification:
+
+- `python .\tools\test_power_regression_check.py` -> `[PASS] 3 power regression tests`
+- `python -m py_compile .\tools\test_power_regression_check.py` -> pass
+
+Mainline verification:
+
+- `python .\tools\power_regression_check.py --mode boost --port COM9 --channel 1 --samples 30 --interval 0.25`
+  -> PASS:
+  - `avg_mA=140.7`
+  - `min_mA=107.0`
+  - `max_mA=224.0`
+  - `avg_voltage_mV=5096`
+  - target `160 mA`
+- Immediate idle run after boost hit `COM9` access denied. This was treated as
+  a port-availability condition, not a current regression.
+- After waiting 70 seconds for the boost/viewing window to expire:
+  `python .\tools\power_regression_check.py --mode idle --port COM9 --channel 1 --samples 40 --interval 0.25`
+  -> PASS:
+  - `avg_mA=65.9`
+  - `min_mA=40.0`
+  - `max_mA=142.0`
+  - `avg_voltage_mV=5139`
+  - target `75 mA`
+
+No log clear was performed.
+
 ## 2026-05-03 Read-Only Hourly QA Patrol Runner (18:36 +08:00)
 
 Purpose:

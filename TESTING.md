@@ -22,10 +22,16 @@ Host-only tests:
 ```powershell
 python .\tools\test_ring_log.py
 python .\tools\test_power_config.py
+python .\tools\test_power_regression_check.py
 python .\tools\test_dashboard_contract.py
 python .\tools\test_health_verdict.py
 python -m py_compile .\tools\analyze_csv_log.py
 ```
+
+`tools/test_power_regression_check.py` is an offline power gate test. It waits
+for `tools/power_regression_check.py`, then feeds JSON fixtures through
+`--input-json` or an importable checker function and verifies PASS/WARN/FAIL
+output without using a real SmartUSBHub.
 
 Downloaded CSV log quality check:
 
@@ -88,6 +94,17 @@ Power measurement:
 ```powershell
 python .\tools\measure_ch1_current.py --port COM9 --channel 1 --samples 80
 ```
+
+Power regression gate:
+
+```powershell
+python .\tools\power_regression_check.py --mode idle --port COM9 --channel 1 --samples 80
+python .\tools\power_regression_check.py --mode boost --port COM9 --channel 1 --samples 40
+```
+
+`idle` defaults to a `75 mA` target and returns non-zero if exceeded. `boost`
+allows a higher active-viewing target. Use `--input-json` for offline threshold
+tests.
 
 Smoke test side effect:
 
