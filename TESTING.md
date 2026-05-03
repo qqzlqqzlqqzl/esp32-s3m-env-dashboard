@@ -26,8 +26,17 @@ python .\tools\test_power_regression_check.py
 python .\tools\test_dashboard_contract.py
 python .\tools\test_health_verdict.py
 python .\tools\test_time_continuity_check.py
+python .\tools\test_reboot_persistence_contract.py
 python -m py_compile .\tools\analyze_csv_log.py
 ```
+
+`tools/test_reboot_persistence_contract.py` is an offline static contract for
+`tools/reboot_persistence_check.ps1`. It waits until that mainline script exists,
+then verifies the check saves before/after status, config, and history snapshots,
+triggers a reboot, waits for recovery, confirms config persistence and readable
+LittleFS history/ring rows, enforces low_power STA with no SoftAP, runs health
+and time-continuity checks, uses no `/api/log/clear?confirm=1`, and defaults to
+no `/api/config` mutation.
 
 `tools/test_time_continuity_check.py` is an offline NTP/time continuity test.
 It feeds status/history/CSV fixtures into `tools/time_continuity_check.py` and

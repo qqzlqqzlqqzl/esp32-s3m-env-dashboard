@@ -689,6 +689,69 @@ Independent verification by subagent:
 
 No log clear was performed.
 
+## 2026-05-03 Reboot Persistence Check (19:22 +08:00)
+
+Purpose:
+
+- Close the reboot persistence gap from issue #9 without clearing logs or
+  mutating config by default.
+
+Change:
+
+- Added `tools/reboot_persistence_check.ps1`.
+- Added `tools/test_reboot_persistence_contract.py`.
+- `TESTING.md` now lists the reboot persistence contract test.
+
+What the check verifies:
+
+- Captures before-reboot `/api/status` config/storage/network/power fields.
+- Captures before-reboot `/api/history?range=all`.
+- Triggers a serial reset on `COM20` with DTR/RTS.
+- Waits for `/api/status` to become ready again.
+- Compares persisted config keys across reboot.
+- Confirms LittleFS remains mounted and minute ring remains ready.
+- Confirms history rows remain readable and do not unexpectedly shrink.
+- Confirms `ring_count` and `ring_total_writes` do not regress.
+- Confirms reboot returns to `low_power`, STA mode, AP off, and CPU `80 MHz`.
+- Runs `health_verdict.py` and `time_continuity_check.py` after reboot.
+- Does not call `/api/log/clear?confirm=1`.
+- Does not POST `/api/config` by default.
+
+Independent subagent verification:
+
+- `python .\tools\test_reboot_persistence_contract.py` ->
+  `[PASS] 7 reboot persistence contract tests`
+- `python -m py_compile .\tools\test_reboot_persistence_contract.py` -> pass
+
+Mainline verification:
+
+- `.\tools\reboot_persistence_check.ps1 -Port COM20 -Ip 192.168.124.67 -TimeoutSeconds 100`
+  -> PASS:
+  - config persisted across reboot
+  - LittleFS mounted after reboot
+  - minute ring ready after reboot
+  - power mode: `low_power`
+  - network mode: `STA`
+  - AP: disabled
+  - CPU: `80 MHz`
+  - health verdict: `21` checks, `0` warnings
+  - time continuity: `8` checks
+  - before rows: `414`
+  - after rows: `414`
+  - before ring_count: `1205`
+  - after ring_count: `1205`
+  - before ring_total_writes: `1205`
+  - after ring_total_writes: `1205`
+- Host regression tests also passed:
+  - `python .\tools\test_dashboard_contract.py` -> `[PASS] 10 dashboard contract tests`
+  - `python .\tools\test_power_regression_check.py` -> `[PASS] 3 power regression tests`
+  - `python .\tools\test_time_continuity_check.py` -> `[PASS] 5 time continuity tests`
+  - `python .\tools\test_health_verdict.py` -> `[PASS] 4 health verdict tests`
+  - `python .\tools\test_ring_log.py` -> `[PASS] 5 ring log tests`
+  - `python .\tools\test_power_config.py` -> `[PASS] 6 power contract tests`
+
+No log clear was performed.
+
 ## 2026-05-03 Display Wake Endpoint And Backlight Power Evidence (19:15 +08:00)
 
 Purpose:
