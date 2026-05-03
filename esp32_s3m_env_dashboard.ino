@@ -71,7 +71,7 @@ constexpr uint32_t kTimeValidEpoch = 1700000000UL;
 constexpr uint32_t kEpochMinuteFloor = kTimeValidEpoch / 60UL;
 constexpr unsigned long kNtpRetryMs = 60000UL;
 constexpr unsigned long kNtpRefreshMs = 12UL * 60UL * 60UL * 1000UL;
-constexpr uint32_t kDefaultWebBoostMs = 180000UL;
+constexpr uint32_t kDefaultWebBoostMs = 60000UL;
 constexpr uint32_t kMaxWebBoostMs = 600000UL;
 constexpr uint32_t kButtonLongPressMs = 850UL;
 
@@ -2463,6 +2463,22 @@ void handlePerformanceBoost() {
   server.send(200, "application/json; charset=utf-8", json);
 }
 
+void handleDisplayWake() {
+  if (server.method() != HTTP_POST) {
+    server.send(405, "text/plain", "POST required");
+    return;
+  }
+  noteUserActivity();
+  String json = "{\"woke\":true,\"backlight_on\":";
+  json += gBacklightOn ? "true" : "false";
+  json += ",\"lcd_brightness_pct\":";
+  json += String(cfg.lcdBrightnessPct);
+  json += ",\"backlight_timeout_ms\":";
+  json += String(cfg.backlightTimeoutMs);
+  json += "}";
+  server.send(200, "application/json; charset=utf-8", json);
+}
+
 void handleHealth() {
   noteWebActivity();
   String json;
@@ -2840,6 +2856,7 @@ void setupServer() {
   server.on("/api/log.csv", HTTP_GET, handleLogDownload);
   server.on("/api/log/clear", HTTP_POST, handleLogClear);
   server.on("/api/performance/boost", HTTP_POST, handlePerformanceBoost);
+  server.on("/api/display/wake", HTTP_POST, handleDisplayWake);
   server.begin();
 }
 

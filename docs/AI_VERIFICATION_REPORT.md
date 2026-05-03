@@ -689,6 +689,99 @@ Independent verification by subagent:
 
 No log clear was performed.
 
+## 2026-05-03 Display Wake Endpoint And Backlight Power Evidence (19:15 +08:00)
+
+Purpose:
+
+- Address the remaining issue #6 gap identified by the curator: power gate had
+  idle and web boost evidence, but no true LCD/backlight-awake evidence.
+
+Finding:
+
+- Trying to use `/api/config/reset` as a wake method was not valid evidence:
+  it called `setBacklight(true)` but did not refresh `gLastUserActivityMs`, so
+  the normal timeout logic immediately turned the backlight off.
+
+Change:
+
+- Added `POST /api/display/wake`.
+- The endpoint is non-persistent and does not change config or logs.
+- It calls `noteUserActivity()` and returns:
+  - `woke`
+  - `backlight_on`
+  - `lcd_brightness_pct`
+  - `backlight_timeout_ms`
+- Reduced `kDefaultWebBoostMs` from `180000 ms` to `60000 ms`. The old 3-minute
+  default caused idle power checks to remain in web-boost mode long after the
+  user stopped interacting. Explicit boost requests can still pass a duration.
+- `tools/test_dashboard_contract.py` now checks the display wake route and JSON
+  fields.
+- `TESTING.md` documents the display wake + backlight power gate command.
+
+Build/upload:
+
+- Arduino CLI compile passed from `$env:TEMP\esp32mini-arduino-build-displaywake`:
+  - Sketch: `944389 bytes`, `72%`
+  - Globals: `78420 bytes`, `23%`
+- Upload to `COM20` passed; all flash writes were hash verified.
+
+Verification:
+
+- `python .\tools\test_dashboard_contract.py` -> `[PASS] 10 dashboard contract tests`
+- `python .\tools\test_power_regression_check.py` -> `[PASS] 3 power regression tests`
+- `python .\tools\test_time_continuity_check.py` -> `[PASS] 5 time continuity tests`
+- `python .\tools\test_health_verdict.py` -> `[PASS] 4 health verdict tests`
+- `python .\tools\test_ring_log.py` -> `[PASS] 5 ring log tests`
+- `python .\tools\test_power_config.py` -> `[PASS] 6 power contract tests`
+
+Backlight awake power evidence:
+
+- Device ready after upload:
+  - `time_source=ntp_rtc`
+  - `power=low_power`
+  - `backlight=false`
+- `POST /api/display/wake`:
+  - `woke=True`
+  - `backlight=True`
+  - `brightness=15`
+  - `timeout=5000`
+- `python .\tools\power_regression_check.py --mode backlight --port COM9 --channel 1 --samples 40 --interval 0.25`
+  -> PASS:
+  - `avg_mA=53.0`
+  - `min_mA=41.0`
+  - `max_mA=188.0`
+  - `avg_voltage_mV=5142`
+  - target `180 mA`
+- After timeout:
+  - `backlight=False`
+
+Idle power evidence after shorter boost expiry:
+
+- After waiting past the new 60-second default web boost window:
+  `python .\tools\power_regression_check.py --mode idle --port COM9 --channel 1 --samples 40 --interval 0.25`
+  -> PASS:
+  - `avg_mA=60.5`
+  - `min_mA=41.0`
+  - `max_mA=195.0`
+  - `avg_voltage_mV=5140`
+  - target `75 mA`
+
+Hourly patrol after upload:
+
+- `.\tools\hourly_qa_patrol.ps1 -Ip 192.168.124.67 -WithBoost -SkipPower`
+  -> PASS:
+  - health verdict: `21` checks, `0` warnings
+  - time continuity: `8` checks
+  - `/api/history?range=all`: `2796 ms` for `414` rows
+  - `/api/log.csv`: `2610 ms`
+  - protected clear: `48 ms`, HTTP 400 expected
+  - browser UX: PASS
+  - range clicks: `10.5-34.0 ms`
+  - `/api/history?range=all` browser requests: `1`
+  - all four chart canvases nonblank
+
+No log clear was performed.
+
 ## 2026-05-03 Backlog Curator Protocol (18:56 +08:00)
 
 Purpose:

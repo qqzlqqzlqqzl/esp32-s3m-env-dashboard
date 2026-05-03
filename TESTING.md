@@ -106,11 +106,13 @@ Power regression gate:
 ```powershell
 python .\tools\power_regression_check.py --mode idle --port COM9 --channel 1 --samples 80
 python .\tools\power_regression_check.py --mode boost --port COM9 --channel 1 --samples 40
+curl.exe --noproxy "*" --silent --show-error --fail -X POST http://192.168.124.67/api/display/wake
+python .\tools\power_regression_check.py --mode backlight --port COM9 --channel 1 --samples 40
 ```
 
 `idle` defaults to a `75 mA` target and returns non-zero if exceeded. `boost`
-allows a higher active-viewing target. Use `--input-json` for offline threshold
-tests.
+allows a higher active-viewing target. `backlight` is for the LCD awake window
+after `/api/display/wake`. Use `--input-json` for offline threshold tests.
 
 Smoke test side effect:
 

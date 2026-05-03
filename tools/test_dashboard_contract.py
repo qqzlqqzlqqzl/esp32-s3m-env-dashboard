@@ -101,6 +101,18 @@ def test_web_interaction_boost_contract() -> None:
     assert_regex(html, r"fetch\('/api/performance/boost", "HTML boost button should call boost endpoint")
 
 
+def test_display_wake_endpoint_contract() -> None:
+    source = read(INO)
+    wake_body = extract_function_body(source, "handleDisplayWake")
+
+    assert_contains(wake_body, "HTTP_POST", "handleDisplayWake")
+    assert_contains(wake_body, "noteUserActivity", "handleDisplayWake")
+    assert_contains(wake_body, "backlight_on", "handleDisplayWake")
+    assert_contains(wake_body, "lcd_brightness_pct", "handleDisplayWake")
+    assert_contains(wake_body, "backlight_timeout_ms", "handleDisplayWake")
+    assert_contains(source, 'server.on("/api/display/wake"', "server routes")
+
+
 def test_log_clear_button_and_post_endpoint() -> None:
     source = read(INO)
     html = extract_html(source)
@@ -278,6 +290,7 @@ def main() -> None:
     tests = [
         test_history_frontend_cache_and_fast_range_switch,
         test_web_interaction_boost_contract,
+        test_display_wake_endpoint_contract,
         test_log_clear_button_and_post_endpoint,
         test_log_export_quality_guards,
         test_http_read_only_patrol_script_exists,
