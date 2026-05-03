@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 INO = ROOT / "esp32_s3m_env_dashboard.ino"
 README = ROOT / "README.md"
 TESTING = ROOT / "TESTING.md"
+BROWSER_UX = ROOT / "tools" / "browser_ux_check.mjs"
 
 
 def read(path: Path) -> str:
@@ -176,6 +177,38 @@ def test_http_read_only_patrol_script_exists() -> None:
     assert "api/config" not in text, "read-only patrol must not POST /api/config"
 
 
+def test_browser_ux_check_script_contract() -> None:
+    text = read(BROWSER_UX)
+
+    for token in [
+        "Chrome DevTools Protocol",
+        "remote-debugging-port",
+        "user-data-dir",
+        "webSocketDebuggerUrl",
+        "Network.requestWillBeSent",
+        "Runtime.evaluate",
+        "data-range",
+        "/api/history?range=all",
+        "allHistoryRequests.length > 1",
+        "chartCo2",
+        "chartVoc",
+        "chartNox",
+        "chartLux",
+        "getImageData",
+        "[PASS] dashboard browser UX check",
+        "[METRIC]",
+        "[WARN]",
+    ]:
+        assert_contains(text, token, "browser_ux_check.mjs")
+
+    for range_value in ['"ram"', '"60"', '"360"', '"1440"', '"4320"', '"all"']:
+        assert_contains(text, range_value, "browser_ux_check.mjs range buttons")
+
+    assert_regex(text, r"FAIL_CLICK_MS\s*=\s*2000", "browser UX obvious-failure threshold")
+    assert_regex(text, r"WARN_CLICK_MS\s*=\s*500", "browser UX warning threshold")
+    assert_regex(text, r"fs\.rm\(userDataDir,\s*\{\s*recursive:\s*true,\s*force:\s*true\s*\}\)", "browser UX temp cleanup")
+
+
 def test_time_sync_contract() -> None:
     source = read(INO)
     html = extract_html(source)
@@ -248,6 +281,7 @@ def main() -> None:
         test_log_clear_button_and_post_endpoint,
         test_log_export_quality_guards,
         test_http_read_only_patrol_script_exists,
+        test_browser_ux_check_script_contract,
         test_time_sync_contract,
         test_single_button_lcd_menu_contract,
         test_docs_describe_new_dashboard_contract,

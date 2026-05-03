@@ -43,6 +43,19 @@ Hardware read-only perf check (no `/api/config`, no data clear):
 .\tools\http_perf_check.ps1 -Port COM20
 ```
 
+Browser UX range-click check (headless Chrome, no npm dependencies):
+
+```powershell
+node .\tools\browser_ux_check.mjs --url http://192.168.124.67/
+```
+
+Use `--chrome "C:\Program Files\Google\Chrome\Application\chrome.exe"` if
+Chrome is installed in a non-default location, and `--port 9222` when a fixed
+Chrome DevTools Protocol port is needed. The check opens an isolated temporary
+profile, waits for the dashboard minute history preload, clicks 实时/1小时/6小时/1天/3天/全部分钟,
+fails duplicate `/api/history?range=all` requests, verifies all chart canvases
+are non-empty, and prints `[PASS]` with timing metrics.
+
 Optional: include a temporary web boost window for more stable timing:
 
 ```powershell

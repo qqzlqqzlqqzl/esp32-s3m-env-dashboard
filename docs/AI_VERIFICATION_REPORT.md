@@ -688,3 +688,64 @@ Independent verification by subagent:
   - Protected clear: `68 ms`, HTTP 400 expected
 
 No log clear was performed.
+
+## 2026-05-03 Browser UX Range Click Patrol (18:24 +08:00)
+
+Purpose:
+
+- Convert the user's slow dashboard range-switching complaint into a repeatable
+  browser test that actually opens Chrome, clicks the dashboard buttons, and
+  checks rendered chart canvases.
+
+Change:
+
+- Added `tools/browser_ux_check.mjs`.
+- The script uses only Node.js standard libraries and a headless Chrome DevTools
+  Protocol connection. It does not require Playwright or npm packages.
+- The script starts Chrome with an isolated temporary profile, no proxy, and a
+  temporary remote-debugging port.
+- It waits for the dashboard minute cache preload, clicks:
+  - realtime
+  - 1 hour
+  - 6 hours
+  - 1 day
+  - 3 days
+  - all minutes
+- It fails if `/api/history?range=all` is requested more than once, if a click
+  takes more than 2 seconds, or if any of `chartCo2`, `chartVoc`, `chartNox`,
+  and `chartLux` are blank.
+- `tools/test_dashboard_contract.py` now includes a source contract for the
+  browser UX patrol script.
+- `TESTING.md` documents the new command.
+
+Verification:
+
+- `node --check .\tools\browser_ux_check.mjs` -> pass
+- `python .\tools\test_dashboard_contract.py` -> `[PASS] 9 dashboard contract tests`
+- `node .\tools\browser_ux_check.mjs --url http://192.168.124.67/` -> PASS:
+  - preload: `2871 ms`
+  - `/api/history?range=all` requests: `1`
+  - realtime click: `16.5 ms`
+  - 1 hour click: `32.1 ms`
+  - 6 hour click: `33.1 ms`
+  - 1 day click: `30.3 ms`
+  - 3 day click: `32.5 ms`
+  - all minutes click: `32.3 ms`
+  - `chartCo2`, `chartVoc`, `chartNox`, and `chartLux`: nonblank
+
+Same-session hardware baseline:
+
+- `.\tools\http_perf_check.ps1 -Port COM20 -SerialSeconds 18 -WithBoost` -> PASS:
+  - `/api/status`: `690 ms`
+  - `/api/health`: `109 ms`
+  - `/api/history?range=60`: `1858 ms`
+  - `/api/history?range=all`: `2207 ms` for `376` rows
+  - `/api/log.csv`: `2009 ms`
+  - `/`: `176 ms`
+  - protected clear: `65 ms`, HTTP 400 expected
+- `python .\tools\measure_ch1_current.py --port COM9 --channel 1 --samples 40 --interval 0.25`:
+  - `avg_mA=67.0`
+  - `min_mA=38.0`
+  - `max_mA=135.0`
+
+No log clear was performed.
