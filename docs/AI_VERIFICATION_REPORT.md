@@ -689,6 +689,60 @@ Independent verification by subagent:
 
 No log clear was performed.
 
+## 2026-05-03 Read-Only Hourly QA Patrol Runner (18:36 +08:00)
+
+Purpose:
+
+- Close the P0 gap where hourly QA behavior existed in automation text but not
+  as a repository-owned runner that future agents can execute consistently.
+
+Change:
+
+- Added `tools/hourly_qa_patrol.ps1`.
+- The runner is read-only for device state:
+  - runs `git status` and recent git log
+  - runs host contract tests
+  - compiles Python tools
+  - parses `http_perf_check.ps1`
+  - discovers IP from serial `[ENV]` when possible
+  - runs `health_verdict.py`
+  - runs `http_perf_check.ps1`
+  - runs `browser_ux_check.mjs` unless skipped
+  - optionally samples SmartUSBHub CH1 current
+- It does not call `/api/config`.
+- It does not call confirmed log clear. The HTTP patrol only verifies
+  unconfirmed `/api/log/clear` returns HTTP 400.
+- It distinguishes serial discovery failure, device IP failure, HTTP/API
+  failure, browser UX failure, and power measurement warnings.
+
+Verification:
+
+- PowerShell parse check for `tools/hourly_qa_patrol.ps1` -> pass
+- First run without `-Ip` exposed a real serial-port availability condition:
+  `COM20` access denied, no IP discovered, runner returned FAIL with explicit
+  serial/IP messages.
+- Full run with known IP:
+  `.\tools\hourly_qa_patrol.ps1 -Ip 192.168.124.67 -WithBoost -PowerSamples 20`
+  -> PASS:
+  - host tests passed
+  - health verdict: `21` checks, `0` warnings
+  - HTTP history all: `2048 ms` for `386` rows
+  - CSV: `1866 ms`
+  - browser UX preload: `2789 ms`
+  - browser range clicks: `5.0-33.2 ms`
+  - `/api/history?range=all` browser requests: `1`
+  - CH1 current sample: `125.0 mA` average during active/boosted viewing
+- Boost propagation retest:
+  `.\tools\hourly_qa_patrol.ps1 -Ip 192.168.124.67 -WithBoost -SkipBrowser -SkipPower`
+  -> PASS:
+  - `POST /api/performance/boost`: `57 ms`
+  - `/api/history?range=all`: `2387 ms` for `387` rows
+  - `/api/log.csv`: `2156 ms`
+  - protected clear: `51 ms`
+  - final metric reported `boost=True`
+
+No log clear was performed.
+
 ## 2026-05-03 Independent Health Verdict And Patrol Hardening (18:32 +08:00)
 
 Purpose:

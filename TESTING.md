@@ -44,6 +44,16 @@ Hardware read-only perf check (no `/api/config`, no data clear):
 .\tools\http_perf_check.ps1 -Port COM20
 ```
 
+Hourly read-only QA patrol runner:
+
+```powershell
+.\tools\hourly_qa_patrol.ps1 -Port COM20 -WithBoost
+```
+
+This wraps git status, host tests, `health_verdict.py`, `http_perf_check.ps1`,
+browser UX range-click checks, and optional SmartUSBHub CH1 power sampling. It
+does not call `/api/config` and does not clear logs.
+
 Independent health verdict only:
 
 ```powershell
