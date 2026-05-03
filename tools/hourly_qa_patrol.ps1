@@ -122,7 +122,11 @@ Invoke-Step "Host tests" {
   if ($LASTEXITCODE -ne 0) { throw "test_power_regression_check.py failed" }
   python .\tools\test_health_verdict.py
   if ($LASTEXITCODE -ne 0) { throw "test_health_verdict.py failed" }
-  python -m py_compile .\tools\measure_ch1_current.py .\tools\analyze_csv_log.py .\tools\health_verdict.py .\tools\power_regression_check.py
+  if (Test-Path .\tools\test_time_continuity_check.py) {
+    python .\tools\test_time_continuity_check.py
+    if ($LASTEXITCODE -ne 0) { throw "test_time_continuity_check.py failed" }
+  }
+  python -m py_compile .\tools\measure_ch1_current.py .\tools\analyze_csv_log.py .\tools\health_verdict.py .\tools\power_regression_check.py .\tools\time_continuity_check.py
   if ($LASTEXITCODE -ne 0) { throw "py_compile failed" }
   [scriptblock]::Create((Get-Content -Raw .\tools\http_perf_check.ps1)) | Out-Null
 }
@@ -138,6 +142,11 @@ if ([string]::IsNullOrWhiteSpace($Ip)) {
   Invoke-Step "Independent health verdict" {
     python .\tools\health_verdict.py --base-url $base
     if ($LASTEXITCODE -ne 0) { throw "health verdict failed" }
+  }
+
+  Invoke-Step "NTP and minute continuity" {
+    python .\tools\time_continuity_check.py --base-url $base
+    if ($LASTEXITCODE -ne 0) { throw "time continuity failed" }
   }
 
   Invoke-Step "Read-only HTTP perf check" {

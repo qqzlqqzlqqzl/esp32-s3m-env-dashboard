@@ -25,8 +25,14 @@ python .\tools\test_power_config.py
 python .\tools\test_power_regression_check.py
 python .\tools\test_dashboard_contract.py
 python .\tools\test_health_verdict.py
+python .\tools\test_time_continuity_check.py
 python -m py_compile .\tools\analyze_csv_log.py
 ```
+
+`tools/test_time_continuity_check.py` is an offline NTP/time continuity test.
+It feeds status/history/CSV fixtures into `tools/time_continuity_check.py` and
+verifies PASS/FAIL output for synced NTP/RTC time, uptime-only failures, and
+non-monotonic minute history or CSV rows.
 
 `tools/test_power_regression_check.py` is an offline power gate test. It waits
 for `tools/power_regression_check.py`, then feeds JSON fixtures through

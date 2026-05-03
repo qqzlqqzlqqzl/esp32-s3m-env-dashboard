@@ -689,6 +689,65 @@ Independent verification by subagent:
 
 No log clear was performed.
 
+## 2026-05-03 NTP And Minute Continuity Gate (18:53 +08:00)
+
+Purpose:
+
+- Convert issue #7 from a manual observation into a read-only gate for NTP/RTC
+  synchronization and monotonic minute history.
+
+Change:
+
+- Added `tools/time_continuity_check.py`.
+- Added `tools/test_time_continuity_check.py` with offline fixtures for:
+  - synced `ntp_rtc` PASS
+  - uptime/unsynced FAIL
+  - repeated history minute FAIL
+  - CSV minute rollback FAIL
+- `tools/hourly_qa_patrol.ps1` now runs the time continuity check after
+  `health_verdict.py` and before the HTTP perf sweep.
+- `TESTING.md` lists the new host test.
+
+Verification:
+
+- `python .\tools\test_time_continuity_check.py` -> `[PASS] 5 time continuity tests`
+- `python .\tools\test_power_regression_check.py` -> `[PASS] 3 power regression tests`
+- `python .\tools\test_health_verdict.py` -> `[PASS] 4 health verdict tests`
+- `python .\tools\test_dashboard_contract.py` -> `[PASS] 9 dashboard contract tests`
+- `python .\tools\test_ring_log.py` -> `[PASS] 5 ring log tests`
+- `python .\tools\test_power_config.py` -> `[PASS] 6 power contract tests`
+- `python -m py_compile .\tools\time_continuity_check.py .\tools\test_time_continuity_check.py .\tools\power_regression_check.py .\tools\health_verdict.py .\tools\analyze_csv_log.py .\tools\measure_ch1_current.py`
+  -> pass
+
+Direct hardware time check:
+
+- `python .\tools\time_continuity_check.py --ip 192.168.124.67` -> PASS:
+  - `sync_time=True`
+  - `time_source=ntp_rtc`
+  - `epoch_s=1777805360`
+  - `epoch_minute=29630089`
+  - `local_time=2026-05-03 18:49:20`
+  - history rows: `400`, monotonic
+  - CSV rows: `400`, monotonic
+  - latest minute: `29630089`
+
+Hourly runner verification:
+
+- `.\tools\hourly_qa_patrol.ps1 -Ip 192.168.124.67 -WithBoost -SkipBrowser -SkipPower`
+  -> PASS:
+  - host tests passed, including time continuity tests
+  - health verdict: `21` checks, `0` warnings
+  - time continuity: `8` checks
+  - `time_source=ntp_rtc`
+  - `epoch_minute=29630092`
+  - history rows: `403`, monotonic
+  - CSV rows: `403`, monotonic
+  - `/api/history?range=all`: `2785 ms` for `403` rows
+  - `/api/log.csv`: `2588 ms`
+  - protected clear: `48 ms`, HTTP 400 expected
+
+No log clear was performed.
+
 ## 2026-05-03 SmartUSBHub Power Regression Gate (18:43 +08:00)
 
 Purpose:
