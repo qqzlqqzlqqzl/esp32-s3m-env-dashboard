@@ -23,6 +23,7 @@ Host-only tests:
 python .\tools\test_ring_log.py
 python .\tools\test_power_config.py
 python .\tools\test_dashboard_contract.py
+python .\tools\test_health_verdict.py
 python -m py_compile .\tools\analyze_csv_log.py
 ```
 
@@ -42,6 +43,16 @@ Hardware read-only perf check (no `/api/config`, no data clear):
 ```powershell
 .\tools\http_perf_check.ps1 -Port COM20
 ```
+
+Independent health verdict only:
+
+```powershell
+python .\tools\health_verdict.py --ip 192.168.124.67
+```
+
+This is a read-only objective checker for `/api/status` and `/api/health`.
+It exits non-zero for hard health failures and prints `[WARN]` for degraded but
+still-running conditions.
 
 Browser UX range-click check (headless Chrome, no npm dependencies):
 

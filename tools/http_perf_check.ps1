@@ -173,8 +173,8 @@ Set-Location -LiteralPath $ProjectRoot
 if (-not $Ip) {
   Write-Host "[CHECK] Reading serial telemetry from $Port for IP discovery"
   $serialText = Read-SerialTelemetry -Name $Port -Seconds $SerialSeconds
-  $envLines = $serialText -split "(`r`n|`n|`r)" | Where-Object { $_ -match "^\[ENV\]" }
-  if (($envLines | Measure-Object).Count -gt 0) {
+  $envLines = @($serialText -split "(`r`n|`n|`r)" | Where-Object { $_ -match "^\[ENV\]" })
+  if ($envLines.Count -gt 0) {
     $lastEnv = $envLines[-1]
     Write-Host "[CHECK] Last serial line: $lastEnv"
     Assert-True ($lastEnv -match "sht=on") "Serial SHT41 is not online"
@@ -211,6 +211,10 @@ $health = Convert-JsonText $healthResp.Text
 Assert-True ($health.ok -eq $true) "/api/health ok=false"
 Assert-True ($health.ring_ready -eq $true) "/api/health ring_ready=false"
 Assert-True ($health.power_ok -eq $true) "/api/health power_ok=false"
+
+Write-Host "[CHECK] Independent health verdict"
+python .\tools\health_verdict.py --base-url $base
+Assert-True ($LASTEXITCODE -eq 0) "health_verdict.py failed"
 
 if ($WithBoost) {
   Write-Host "[CHECK] POST /api/performance/boost"

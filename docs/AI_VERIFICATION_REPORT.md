@@ -689,6 +689,68 @@ Independent verification by subagent:
 
 No log clear was performed.
 
+## 2026-05-03 Independent Health Verdict And Patrol Hardening (18:32 +08:00)
+
+Purpose:
+
+- Close the P0 gap where the main agent and `http_perf_check.ps1` were the only
+  health judges.
+- Add a read-only script with objective exit codes for `/api/status` and
+  `/api/health`.
+
+Change:
+
+- Added `tools/health_verdict.py`.
+- Added `tools/test_health_verdict.py` with offline PASS/FAIL/WARN fixtures.
+- `tools/http_perf_check.ps1` now calls `health_verdict.py` during hardware
+  patrol.
+- Fixed a patrol-script bug where PowerShell treated a single serial `[ENV]`
+  line as a scalar string, so `$envLines[-1]` returned the final character
+  instead of the line. The script now wraps serial matches in an array before
+  selecting the newest telemetry line.
+- `TESTING.md` now lists both the host-side health verdict tests and direct
+  hardware verdict command.
+
+Independent subagent verification:
+
+- `python .\tools\test_health_verdict.py` -> `[PASS] 4 health verdict tests`
+- `python -m py_compile .\tools\test_health_verdict.py .\tools\health_verdict.py`
+  -> pass
+
+Mainline verification:
+
+- `python .\tools\test_health_verdict.py` -> `[PASS] 4 health verdict tests`
+- `python .\tools\test_dashboard_contract.py` -> `[PASS] 9 dashboard contract tests`
+- `python .\tools\test_ring_log.py` -> `[PASS] 5 ring log tests`
+- `python .\tools\test_power_config.py` -> `[PASS] 6 power contract tests`
+- `python -m py_compile .\tools\health_verdict.py .\tools\test_health_verdict.py .\tools\analyze_csv_log.py`
+  -> pass
+- `python .\tools\health_verdict.py --ip 192.168.124.67` -> PASS:
+  - `21` checks
+  - `0` warnings
+  - all four sensors online
+  - I2C `400 kHz`
+  - LittleFS mounted
+  - minute ring ready
+  - `power_ok=true`
+  - time fields present
+  - storage failures `0`
+  - loop stalls `0`
+  - WiFi reconnects `0`
+- `.\tools\http_perf_check.ps1 -Port COM20 -SerialSeconds 18 -WithBoost` -> PASS:
+  - Serial line parsed correctly:
+    `[ENV] sht=on ... scd=on ... sgp=on ... bh=on ... ip=192.168.124.67`
+  - embedded health verdict: PASS
+  - `/api/status`: `332 ms`
+  - `/api/health`: `75 ms`
+  - `/api/history?range=60`: `1536 ms`
+  - `/api/history?range=all`: `1885 ms` for `382` rows
+  - `/api/log.csv`: `1735 ms`
+  - `/`: `191 ms`
+  - protected clear: `64 ms`, HTTP 400 expected
+
+No log clear was performed.
+
 ## 2026-05-03 Browser UX Range Click Patrol (18:24 +08:00)
 
 Purpose:
