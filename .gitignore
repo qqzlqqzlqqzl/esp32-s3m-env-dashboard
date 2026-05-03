@@ -14,3 +14,4 @@ arduino_cli*.yml
 arduino_data*/
 arduino_downloads*/
 arduino_user*/
+_verify_*.csv

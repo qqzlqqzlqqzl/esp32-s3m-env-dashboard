@@ -68,6 +68,7 @@ constexpr char kNtpServer1[] = "pool.ntp.org";
 constexpr char kNtpServer2[] = "time.nist.gov";
 constexpr char kNtpServer3[] = "ntp.aliyun.com";
 constexpr uint32_t kTimeValidEpoch = 1700000000UL;
+constexpr uint32_t kEpochMinuteFloor = kTimeValidEpoch / 60UL;
 constexpr unsigned long kNtpRetryMs = 60000UL;
 constexpr unsigned long kNtpRefreshMs = 12UL * 60UL * 60UL * 1000UL;
 constexpr uint32_t kDefaultWebBoostMs = 180000UL;
@@ -127,6 +128,9 @@ uint32_t gLoopStallCount = 0;
 uint32_t gMaxLoopGapMs = 0;
 uint32_t gLastPersistDurationMs = 0;
 uint32_t gMaxPersistDurationMs = 0;
+uint32_t gDroppedInvalidSamples = 0;
+uint32_t gDroppedUnsyncedSamples = 0;
+uint32_t gDroppedTimeDomainSamples = 0;
 uint8_t gDisplayPage = 0;
 bool gForceDisplayDraw = true;
 bool gBacklightOn = true;
@@ -1281,7 +1285,15 @@ SampleRow makeSample() {
   row.voc = env.vocIndex;
   row.nox = env.noxIndex;
   row.lux = env.lux;
-  row.ok = env.shtOnline && env.scdOnline && env.sgpOnline && env.bhOnline;
+  row.ok = env.shtOnline && env.scdOnline && env.sgpOnline && env.bhOnline &&
+           env.shtOk > 0 && env.scdOk > 0 && env.sgpOk > 0 && env.bhOk > 0 &&
+           env.sgpConditioning == 0 &&
+           row.co2 > 0 &&
+           isfinite(row.tempC) && row.tempC > -40.0f && row.tempC < 85.0f &&
+           isfinite(row.humidity) && row.humidity >= 0.0f && row.humidity <= 100.0f &&
+           env.srawVoc > 0 && env.srawNox > 0 &&
+           row.voc >= 0 && row.nox >= 0 &&
+           isfinite(row.lux) && row.lux >= 0.0f;
   return row;
 }
 
@@ -1394,6 +1406,9 @@ bool clearMinuteLog() {
   gLastSampleMs = 0;
   gLastPersistDurationMs = 0;
   gMaxPersistDurationMs = 0;
+  gDroppedInvalidSamples = 0;
+  gDroppedUnsyncedSamples = 0;
+  gDroppedTimeDomainSamples = 0;
   const bool ok = createMinuteRingFile();
   gMinuteRingReady = ok;
   if (ok) {
@@ -1463,9 +1478,20 @@ bool appendMinuteAggregate() {
   return appendMinuteRecord(record);
 }
 
+bool minuteKeyIsEpoch(uint32_t minute) {
+  return minute >= kEpochMinuteFloor;
+}
+
+bool shouldHoldLoggingForTimeSync() {
+  return !gTimeSynced && strlen(kStaSsid) > 0;
+}
+
 void updateMinuteAggregate(const SampleRow &row) {
   const uint32_t minute = currentMinuteKey();
   if (gMinuteAgg.count == 0) {
+    resetMinuteAggregate(minute);
+  } else if (minuteKeyIsEpoch(gMinuteAgg.minute) != minuteKeyIsEpoch(minute)) {
+    gDroppedTimeDomainSamples += gMinuteAgg.count;
     resetMinuteAggregate(minute);
   } else if (minute != gMinuteAgg.minute) {
     appendMinuteAggregate();
@@ -1485,7 +1511,15 @@ void publishSampleIfDue() {
   static unsigned long lastSample = 0;
   if (millis() - lastSample < cfg.logIntervalMs) return;
   lastSample = millis();
+  if (shouldHoldLoggingForTimeSync()) {
+    gDroppedUnsyncedSamples++;
+    return;
+  }
   const SampleRow row = makeSample();
+  if (!row.ok) {
+    gDroppedInvalidSamples++;
+    return;
+  }
   pushHistory(row);
   updateMinuteAggregate(row);
 }
@@ -2015,6 +2049,12 @@ String statusJson() {
   json += String(gLastPersistDurationMs);
   json += ",\"max_persist_duration_ms\":";
   json += String(gMaxPersistDurationMs);
+  json += ",\"dropped_invalid_samples\":";
+  json += String(gDroppedInvalidSamples);
+  json += ",\"dropped_unsynced_samples\":";
+  json += String(gDroppedUnsyncedSamples);
+  json += ",\"dropped_time_domain_samples\":";
+  json += String(gDroppedTimeDomainSamples);
   json += ",\"used_bytes\":";
   json += gFsReady ? String(LittleFS.usedBytes()) : "0";
   json += ",\"total_bytes\":";
@@ -2421,7 +2461,7 @@ void handleLogDownload() {
   char outBuffer[2048];
   char line[128];
   size_t outUsed = 0;
-  appendBufferedContent("minute,count,co2_ppm,temp_c,humidity_pct,voc_index,nox_index,lux,ok_ratio\n", outBuffer, sizeof(outBuffer), outUsed);
+  appendBufferedContent("\xEF\xBB\xBFminute,count,co2_ppm,temp_c,humidity_pct,voc_index,nox_index,lux,ok_ratio\n", outBuffer, sizeof(outBuffer), outUsed);
   const uint32_t startSlot = (gMinuteRing.writeIndex + gMinuteRing.capacity - gMinuteRing.count) % gMinuteRing.capacity;
   File segmentFile;
   int32_t openSegment = -1;

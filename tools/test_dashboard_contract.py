@@ -29,7 +29,7 @@ def extract_html(source: str) -> str:
 
 
 def extract_function_body(source: str, name: str) -> str:
-    match = re.search(rf"\b(?:void|bool|String|uint32_t)\s+{re.escape(name)}\s*\([^)]*\)\s*\{{", source)
+    match = re.search(rf"\b(?:void|bool|String|uint32_t|SampleRow)\s+{re.escape(name)}\s*\([^)]*\)\s*\{{", source)
     assert match, f"{name} function not found"
     start = match.end()
     depth = 1
@@ -115,6 +115,35 @@ def test_log_clear_button_and_post_endpoint() -> None:
     assert_contains(clear_body, "400", "handleLogClear")
     assert_contains(clear_body, "clearMinuteLog", "handleLogClear")
     assert_contains(source, 'server.on("/api/log/clear"', "server routes")
+
+
+def test_log_export_quality_guards() -> None:
+    source = read(INO)
+    make_sample = extract_function_body(source, "makeSample")
+    publish_sample = extract_function_body(source, "publishSampleIfDue")
+    update_aggregate = extract_function_body(source, "updateMinuteAggregate")
+    log_download = extract_function_body(source, "handleLogDownload")
+    clear_log = extract_function_body(source, "clearMinuteLog")
+    status_json = extract_function_body(source, "statusJson")
+
+    assert_contains(log_download, "\\xEF\\xBB\\xBFminute,count", "CSV download should include UTF-8 BOM for Excel")
+    assert_contains(make_sample, "env.shtOk > 0", "sample validity should require SHT readings")
+    assert_contains(make_sample, "env.scdOk > 0", "sample validity should require SCD readings")
+    assert_contains(make_sample, "env.sgpOk > 0", "sample validity should require SGP readings")
+    assert_contains(make_sample, "env.bhOk > 0", "sample validity should require BH1750 readings")
+    assert_contains(make_sample, "env.sgpConditioning == 0", "sample validity should reject SGP41 conditioning data")
+    assert_contains(make_sample, "row.co2 > 0", "sample validity should reject zero CO2")
+    assert_contains(make_sample, "env.srawVoc > 0", "sample validity should reject empty SGP raw VOC")
+    assert_contains(make_sample, "env.srawNox > 0", "sample validity should reject empty SGP raw NOx")
+    assert_contains(publish_sample, "shouldHoldLoggingForTimeSync", "logging should wait for real time when STA is configured")
+    assert_contains(publish_sample, "gDroppedUnsyncedSamples", "unsynced drops should be counted")
+    assert_contains(publish_sample, "gDroppedInvalidSamples", "invalid drops should be counted")
+    assert_contains(update_aggregate, "minuteKeyIsEpoch", "minute aggregation should detect time-domain switches")
+    assert_contains(update_aggregate, "gDroppedTimeDomainSamples", "time-domain drops should be counted")
+    for token in ["dropped_invalid_samples", "dropped_unsynced_samples", "dropped_time_domain_samples"]:
+        assert_contains(status_json, token, "statusJson should expose dropped sample counters")
+    for token in ["gDroppedInvalidSamples", "gDroppedUnsyncedSamples", "gDroppedTimeDomainSamples"]:
+        assert_contains(clear_log, token, "clear log should reset drop counters")
 
 
 def test_http_read_only_patrol_script_exists() -> None:
@@ -212,6 +241,7 @@ def main() -> None:
         test_history_frontend_cache_and_fast_range_switch,
         test_web_interaction_boost_contract,
         test_log_clear_button_and_post_endpoint,
+        test_log_export_quality_guards,
         test_http_read_only_patrol_script_exists,
         test_time_sync_contract,
         test_single_button_lcd_menu_contract,

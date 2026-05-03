@@ -23,7 +23,17 @@ Host-only tests:
 python .\tools\test_ring_log.py
 python .\tools\test_power_config.py
 python .\tools\test_dashboard_contract.py
+python -m py_compile .\tools\analyze_csv_log.py
 ```
+
+Downloaded CSV log quality check:
+
+```powershell
+python .\tools\analyze_csv_log.py "C:\Users\lyl\Downloads\log (1).csv" --require-bom
+```
+
+This check fails if the export lacks the UTF-8 BOM needed for reliable Excel
+opening, contains zero core sensor rows, or mixes/discontinues minute keys.
 
 Hardware read-only perf check (no `/api/config`, no data clear):
 

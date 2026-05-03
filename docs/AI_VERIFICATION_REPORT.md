@@ -542,3 +542,64 @@ Power note:
   config (`STA`, AP off, 80 MHz, backlight off), so this remains an open power
   investigation rather than a closed regression. Track under the SmartUSBHub
   power regression issue.
+
+## 2026-05-03 CSV Export Dirty Log Fix (17:34 +08:00)
+
+User-provided downloaded log:
+
+- File: `C:\Users\lyl\Downloads\log (1).csv`
+- `python .\tools\analyze_csv_log.py "C:\Users\lyl\Downloads\log (1).csv" --require-bom`:
+  - `rows=1053`
+  - `utf8_bom=False`
+  - `zero_lux_rows=387`
+  - `zero_core_rows=5`
+  - `minute_gaps=12`
+  - Result: FAIL. This reproduces the Excel/dirty-data complaint with objective evidence.
+
+Root causes:
+
+- `/api/log.csv` did not prepend a UTF-8 BOM, so Excel could guess the wrong
+  encoding for CSV content.
+- `SampleRow.ok` only checked sensor online flags; startup rows with no valid
+  SCD41/SGP41/BH1750 data could still be aggregated and persisted.
+- Uptime-minute records and later NTP epoch-minute records could coexist in the
+  ring when time sync happened after logging started.
+
+Fixes:
+
+- `/api/log.csv` now starts with UTF-8 BOM bytes `EF BB BF`.
+- `makeSample()` rejects rows until each sensor has produced at least one valid
+  reading, SGP41 conditioning is complete, CO2 is non-zero, SRAW VOC/NOx are
+  non-zero, and numeric ranges are plausible.
+- When STA credentials are compiled in, persistent logging waits until NTP/RTC
+  time is synced instead of writing uptime-minute rows.
+- If an aggregate ever switches between uptime and epoch minute domains, the
+  in-progress aggregate is dropped rather than persisted.
+- `/api/status.storage` exposes `dropped_invalid_samples`,
+  `dropped_unsynced_samples`, and `dropped_time_domain_samples`.
+- `tools/analyze_csv_log.py` checks exported logs for BOM, zero core rows, and
+  minute continuity.
+
+Verification:
+
+- `python .\tools\test_dashboard_contract.py` -> `[PASS] 8 dashboard contract tests`
+- `python .\tools\test_ring_log.py` -> `[PASS] 5 ring log tests`
+- `python .\tools\test_power_config.py` -> `[PASS] 6 power contract tests`
+- `python -m py_compile .\tools\analyze_csv_log.py` -> exit 0
+- Arduino CLI compile from `$env:TEMP\esp32mini-arduino-build-logfix` -> pass:
+  sketch `943017` bytes (`71%`), globals `78420` bytes (`23%`)
+- Upload to `COM20` -> pass, all flash writes hash verified
+- `.\tools\http_perf_check.ps1 -Port COM20 -SerialSeconds 18 -WithBoost` -> PASS:
+  `/api/history?range=all` `2104 ms` for `1124` rows, `/api/log.csv` `1601 ms`,
+  `/` `132 ms`, protected clear `HTTP 400`.
+- New `/api/log.csv` first bytes: `EF BB BF 6D 69 6E...`, proving Excel BOM is present.
+- `/api/status.storage`: `dropped_invalid_samples=6`,
+  `dropped_unsynced_samples=1`, `dropped_time_domain_samples=0`.
+- `/api/status.time`: `sync_time=true`, `time_source=ntp_rtc`,
+  `local_time=2026-05-03 17:34:15`.
+
+Important residual:
+
+- Existing dirty records remain in LittleFS until the user explicitly approves
+  `POST /api/log/clear?confirm=1`. The fix prevents new dirty samples from being
+  added; it does not rewrite old Flash history in place.
