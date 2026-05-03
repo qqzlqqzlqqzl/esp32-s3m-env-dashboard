@@ -1,4 +1,16 @@
 .arduino-build/
 .arduino-build*/
+.arduino-build-sandbox/
 __pycache__/
 *.pyc
+
+# Arduino CLI local sandbox caches/config (do not commit)
+.arduino-cli*.yaml
+arduino_cli*.yaml
+arduino_cli*.yml
+.arduino-data/
+.arduino-downloads/
+.arduino-user/
+arduino_data*/
+arduino_downloads*/
+arduino_user*/

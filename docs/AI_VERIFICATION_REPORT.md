@@ -9,14 +9,14 @@ checks.
 Command pattern:
 
 ```powershell
-arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --build-path "C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard\.arduino-build" --build-property 'build.extra_flags=-DWIFI_STA_SSID="<ssid>" -DWIFI_STA_PASS="<redacted>"' "C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard"
+arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --build-path "$env:TEMP\esp32mini-arduino-build" --build-property 'build.extra_flags=-DWIFI_STA_SSID="<ssid>" -DWIFI_STA_PASS="<redacted>"' "C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard"
 ```
 
 Observed result after low-power implementation:
 
 - Compile passed.
-- Sketch size around `911005 bytes`, about `69%` of program storage.
-- Global variables around `78252 bytes`, about `23%` of dynamic memory.
+- Sketch size around `942357 bytes`, about `71%` of program storage.
+- Global variables around `78404 bytes`, about `23%` of dynamic memory.
 
 Do not copy the real WiFi password into committed docs. Use environment variable
 examples in docs.
@@ -26,7 +26,7 @@ examples in docs.
 Command:
 
 ```powershell
-arduino-cli upload -p COM20 --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --input-dir "C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard\.arduino-build" "C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard"
+arduino-cli upload -p COM20 --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --input-dir "$env:TEMP\esp32mini-arduino-build" "C:\Users\lyl\Desktop\ESP32Mini\esp32_s3m_env_dashboard"
 ```
 
 Observed result:
@@ -345,3 +345,200 @@ Residual note:
 - BOOT long/short press menu is covered by host source contract and compile.
   Physical button navigation still needs manual observation or a future GPIO
   injection jig to verify every LCD menu transition end-to-end.
+
+## 2026-05-03 Hourly QA Patrol (15:32 +08:00)
+
+Host-only tests:
+
+- `python .\tools\test_dashboard_contract.py` -> `[PASS] 6 dashboard contract tests`
+- `python .\tools\test_ring_log.py` -> `[PASS] 5 ring log tests`
+- `python .\tools\test_power_config.py` -> `[PASS] 6 power contract tests`
+- `python -m py_compile .\tools\measure_ch1_current.py` -> exit 0
+
+Hardware serial snapshot:
+
+```text
+[ENV] sht=on 18.99C 55.34% scd=on co2=406 sgp=on voc=98 nox=1 raw=31543/15839 bh=on 0.83lx fs=on log=966 fail=0 ip=192.168.124.67
+```
+
+HTTP perf sampling (curl.exe with `--noproxy "*"`):
+
+- `/api/status`: initially hit an 8s timeout once, then stabilized at ~`257-350 ms`.
+- `/api/health`: stabilized at ~`71-132 ms`.
+- `/api/history?range=all`: `~16676 ms` and `~18357 ms` for `~131880 bytes` (slow).
+- `/api/log.csv`: `~10421 ms` for `~44640 bytes` (slow).
+- `/`: `~1246 ms` for `~26940 bytes`; required markers present (`数据清零`, `加速查看`, `minuteCache`, etc).
+- `POST /api/log/clear` without confirmation: returned `confirm=1 required` and did not clear data.
+
+Power sampling (SmartUSBHub `COM9`, CH1, 40 samples @ 0.25s):
+
+- `CH1 avg_mA=123.1 min_mA=105.0 max_mA=230.0 avg_voltage_mV=5110`
+- `/api/status.power`: `power_mode=low_power`, `cpu_mhz=80`, `backlight_on=false`, `web_boost_active=true`.
+
+Findings / next:
+
+- History/CSV transfer is substantially slower than the earlier 2026-05-03 evidence (`4532 ms` history-all, `2760 ms` CSV at 707 rows). This now reproduces with ~968 minute rows and boost active; likely needs deeper streaming/buffering optimization beyond `readMinuteRingSlotCached`.
+- Added a read-only hardware perf script `tools/http_perf_check.ps1` (no `/api/config`, no data clear) to make future patrols produce PASS/FAIL evidence and timings.
+- Arduino CLI compile could not be closed in this sandboxed run: `arduino-cli` fails to enumerate hardware platforms from a workspace-local data directory with `Error loading hardware platform: following symlink ...\\packages: Access is denied.` Run compile/upload closure from a non-sandboxed shell until this environment limitation is resolved.
+
+## 2026-05-03 Hourly QA Patrol (16:01 +08:00)
+
+Host-only tests:
+
+- `python .\tools\test_dashboard_contract.py` -> `[PASS] 6 dashboard contract tests`
+- `python .\tools\test_ring_log.py` -> `[PASS] 5 ring log tests`
+- `python .\tools\test_power_config.py` -> `[PASS] 6 power contract tests`
+- `python -m py_compile .\tools\measure_ch1_current.py` -> exit 0
+
+Hardware perf check (read-only, no config writes, no data clear):
+
+- Serial: `[ENV] ... log=1037 ... ip=192.168.124.67`
+- `.\tools\http_perf_check.ps1 -Port COM20 -SerialSeconds 20 -WithBoost`:
+  - `POST /api/performance/boost`: `9405 ms` (slow)
+  - `GET /api/status`: `1305 ms`
+  - `GET /api/health`: `74 ms`
+  - `GET /api/history?range=60`: `1158 ms`
+  - `GET /api/history?range=all`: `18809 ms` for `~141 KB` (slow)
+  - `GET /api/log.csv`: `11539 ms` for `~48 KB` (slow)
+  - `GET /`: `1466 ms` for `~29 KB` (markers present)
+  - `POST /api/log/clear` without confirm: `HTTP 400` (protected clear OK)
+
+Power sampling (SmartUSBHub `COM9`, CH1, 40 samples @ 0.25s):
+
+- `CH1 avg_mA=136.1 min_mA=102.0 max_mA=268.0 samples=40 avg_voltage_mV=5104`
+
+Changes made (needs firmware rebuild+upload to validate on-device):
+
+- Updated `readMinuteRingSlotCached` to avoid redundant `seek()` calls when streaming sequential minute rows (uses `file.position()` fast-path).
+- Hardened `tools/http_perf_check.ps1` to always print the endpoint timing table and list failures before exiting non-zero.
+
+Known blocker:
+
+- Arduino CLI compile/upload closure still blocked in this sandbox: `arduino-cli` fails with `Error loading hardware platform: following symlink ...\\packages: Access is denied.` (even for workspace-local Arduino data dirs).
+
+## 2026-05-03 Hourly QA Patrol (17:02 +08:00)
+
+Host-only tests:
+
+- `python .\tools\test_dashboard_contract.py` -> `[PASS] 7 dashboard contract tests`
+- `python .\tools\test_ring_log.py` -> `[PASS] 5 ring log tests`
+- `python .\tools\test_power_config.py` -> `[PASS] 6 power contract tests`
+- `python -m py_compile .\tools\measure_ch1_current.py` -> exit 0
+
+Arduino CLI compile:
+
+- Default Arduino data dir attempt failed before compile with `Access is denied`
+  under `C:\Users\lyl\AppData\Local\Arduino15\packages/tmp`.
+- Workspace-local config attempt also did not reach compile; a later retry timed
+  out after 90 seconds while refreshing Arduino package indexes.
+- No firmware was uploaded in this patrol. The performance/NTP firmware changes
+  remain host-tested but not compile/upload verified.
+
+Hardware read-only HTTP patrol:
+
+- Serial from `COM20`: `[ENV] sht=on 24.15C 81.12% scd=on co2=451 sgp=on voc=115 nox=1 raw=31245/17346 bh=on 12.50lx fs=on log=1086 fail=0 ip=192.168.124.67`
+- `.\tools\http_perf_check.ps1 -Port COM20 -SerialSeconds 20 -WithBoost`:
+  - `POST /api/performance/boost`: `87 ms`
+  - `GET /api/status`: `628 ms`
+  - `GET /api/health`: `71 ms`
+  - `GET /api/history?range=60`: `1343 ms`
+  - `GET /api/history?range=all`: `19413 ms` for `1087` rows / `148318` bytes (slow)
+  - `GET /api/log.csv`: `12607 ms` for `50498` bytes (slow)
+  - `GET /`: `1113 ms` for `26940` bytes; required HTML markers present
+  - `POST /api/log/clear` without confirm: `HTTP 400`, protected clear OK
+
+Power and time observations:
+
+- Immediate post-HTTP/boost CH1 current: `avg_mA=140.1 min_mA=111.0 max_mA=271.0 samples=40 avg_voltage_mV=5097`
+- After waiting 70 seconds with no HTTP request: `avg_mA=115.0 min_mA=105.0 max_mA=205.0 samples=40 avg_voltage_mV=5109`
+- `/api/status.power` still reported low-power config: `power_mode=low_power`, `lcd_brightness_pct=15`, `backlight_on=false`, `wifi_sta_sleep=true`, `ap_enabled=false`, `cpu_mhz=80`.
+- `/api/status.time` reported `sync_time=false`, `time_source=uptime`, `epoch_s=0`, `local_time=unsynced`. NTP is a current hardware/runtime finding.
+
+Changes made (needs compile/upload verification):
+
+- Buffered minute history and CSV streaming with `appendBufferedContent`,
+  `minuteRecordJsonLine`, and `minuteRecordCsvLine` to reduce per-row
+  `server.sendContent` overhead.
+- `readMinuteRingSlotCached` now skips redundant `seek()` for sequential reads.
+- `tools/http_perf_check.ps1` now has `CurlMaxSeconds=30`, so slow endpoints
+  are recorded as warnings and the script still checks CSV, root HTML, and
+  clear protection.
+- Added `ntp.aliyun.com` as `kNtpServer3` and pass three NTP servers to
+  `configTzTime`; dashboard contract now checks this.
+
+Residual risks / next:
+
+- Compile/upload must be completed from a non-sandboxed shell or after fixing
+  Arduino CLI data-dir access, then rerun the HTTP patrol to prove the buffered
+  streaming fix on hardware.
+- NTP should be rechecked after flashing the three-server build; if it still
+  reports `uptime`, investigate UDP/NTP reachability on the STA network.
+- Low-power current is still above the documented `65-75 mA` baseline in this
+  patrol. Re-measure after a clean flash and a longer idle window with no HTTP
+  requests.
+
+## 2026-05-03 Manual Closure After Patrol Fixes (17:12 +08:00)
+
+Root cause fixed:
+
+- Arduino CLI was hanging because build/cache directories such as
+  `.arduino-build-*`, `.arduino-data`, and `arduino_data*` were left inside the
+  sketch root. Arduino CLI copied those directories into `build/sketch`, causing
+  recursive/heavy scanning. Build paths for this project must live outside the
+  sketch, for example under `$env:TEMP`.
+
+Code and test changes:
+
+- Minute history JSON and CSV now stream through a 2 KB response buffer via
+  `appendBufferedContent` / `flushBufferedContent` instead of calling
+  `server.sendContent()` once per row.
+- `minuteRecordJsonLine` and `minuteRecordCsvLine` format rows into stack
+  buffers, reducing temporary `String` churn during large history exports.
+- `tools/http_perf_check.ps1` is the read-only patrol script: no `/api/config`,
+  no confirmed data clear, and `POST /api/log/clear` without `confirm=1` must
+  return HTTP 400.
+- `tools/test_dashboard_contract.py` now checks buffered streaming and the
+  read-only patrol script contract.
+
+Verification:
+
+- `python .\tools\test_dashboard_contract.py` -> `[PASS] 7 dashboard contract tests`
+- `python .\tools\test_ring_log.py` -> `[PASS] 5 ring log tests`
+- `python .\tools\test_power_config.py` -> `[PASS] 6 power contract tests`
+- PowerShell parse check for `tools/http_perf_check.ps1` -> pass
+- Arduino CLI compile from `$env:TEMP\esp32mini-arduino-build-verify` -> pass:
+  sketch `942357` bytes (`71%`), globals `78404` bytes (`23%`)
+- Upload to `COM20` -> pass, all flash writes hash verified
+
+Hardware read-only patrol after flashing:
+
+- Serial: `[ENV] sht=on 24.25C 81.70% scd=on co2=449 sgp=on voc=0 nox=0 raw=31188/0 bh=on 12.50lx fs=on log=1088 fail=0 ip=192.168.124.67`
+- `.\tools\http_perf_check.ps1 -Port COM20 -SerialSeconds 18 -WithBoost`:
+  - `/api/status`: `350 ms`
+  - `/api/health`: `86 ms`
+  - `POST /api/performance/boost`: `49 ms`
+  - `/api/history?range=60`: `268 ms`
+  - `/api/history?range=all`: `1862 ms` for `1089` rows / `148587` bytes
+  - `/api/log.csv`: `1402 ms` for `50587` bytes
+  - `/`: `143 ms`
+  - `POST /api/log/clear` without confirm: `72 ms`, protected HTTP 400
+- NTP after flashing: `sync_time=true`, `time_source=ntp_rtc`,
+  `local_time=2026-05-03 17:12:08`.
+
+Browser UX audit through Edge DevTools Protocol:
+
+- Dashboard preload: `分钟历史已预加载 1093 点`.
+- `/api/history?range=all` resource count stayed `1 -> 1` after clicking range
+  buttons, proving range switching used browser cache.
+- Range click timings: 1h `17 ms`, 6h `28 ms`, 1d `33 ms`, 3d `34 ms`, all
+  `33 ms`, realtime `34 ms`.
+- `chartCo2`, `chartVoc`, `chartNox`, and `chartLux` canvases were nonblank.
+
+Power note:
+
+- With active web viewing/boost, CH1 measured around `116.5 mA`.
+- After closing the test browser and waiting beyond the boost window, CH1 still
+  measured around `124.1 mA` in this run. Status before/after showed low-power
+  config (`STA`, AP off, 80 MHz, backlight off), so this remains an open power
+  investigation rather than a closed regression. Track under the SmartUSBHub
+  power regression issue.

@@ -25,6 +25,18 @@ python .\tools\test_power_config.py
 python .\tools\test_dashboard_contract.py
 ```
 
+Hardware read-only perf check (no `/api/config`, no data clear):
+
+```powershell
+.\tools\http_perf_check.ps1 -Port COM20
+```
+
+Optional: include a temporary web boost window for more stable timing:
+
+```powershell
+.\tools\http_perf_check.ps1 -Port COM20 -WithBoost
+```
+
 Power measurement:
 
 ```powershell

@@ -66,6 +66,7 @@ constexpr char kConfigTmpPath[] = "/env_config.tmp";
 constexpr char kTimeZone[] = "CST-8";
 constexpr char kNtpServer1[] = "pool.ntp.org";
 constexpr char kNtpServer2[] = "time.nist.gov";
+constexpr char kNtpServer3[] = "ntp.aliyun.com";
 constexpr uint32_t kTimeValidEpoch = 1700000000UL;
 constexpr unsigned long kNtpRetryMs = 60000UL;
 constexpr unsigned long kNtpRefreshMs = 12UL * 60UL * 60UL * 1000UL;
@@ -1123,7 +1124,7 @@ void maintainTimeSync() {
   const bool needsRetry = !gTimeSynced && nowMs - gLastTimeSyncAttemptMs >= kNtpRetryMs;
   const bool needsRefresh = gTimeSynced && nowMs - gLastTimeSyncAttemptMs >= kNtpRefreshMs;
   if (needsInitialSync || needsRetry || needsRefresh) {
-    configTzTime(kTimeZone, kNtpServer1, kNtpServer2);
+    configTzTime(kTimeZone, kNtpServer1, kNtpServer2, kNtpServer3);
     gTimeSyncStarted = true;
     gLastTimeSyncAttemptMs = nowMs;
   }
@@ -1335,8 +1336,11 @@ bool readMinuteRingSlotCached(uint32_t slot, MinuteRingRecord *record, File &fil
     openSegment = file ? static_cast<int32_t>(segment) : -1;
   }
   if (!file) return false;
-  return file.seek(minuteRingOffset(segmentSlot), SeekSet) &&
-         file.read(reinterpret_cast<uint8_t *>(record), sizeof(*record)) == sizeof(*record);
+  const size_t offset = minuteRingOffset(segmentSlot);
+  if (file.position() != offset) {
+    if (!file.seek(offset, SeekSet)) return false;
+  }
+  return file.read(reinterpret_cast<uint8_t *>(record), sizeof(*record)) == sizeof(*record);
 }
 
 bool createMinuteRingFile() {
@@ -2126,6 +2130,59 @@ String minuteRecordCsv(const MinuteRingRecord &record) {
   return line;
 }
 
+void flushBufferedContent(char *buffer, size_t &used) {
+  if (used == 0) return;
+  buffer[used] = '\0';
+  server.sendContent(buffer);
+  used = 0;
+}
+
+void appendBufferedContent(const char *text, char *buffer, size_t bufferSize, size_t &used) {
+  const size_t len = strlen(text);
+  if (len + 1 >= bufferSize) {
+    flushBufferedContent(buffer, used);
+    server.sendContent(text);
+    return;
+  }
+  if (used + len + 1 >= bufferSize) {
+    flushBufferedContent(buffer, used);
+  }
+  memcpy(buffer + used, text, len);
+  used += len;
+}
+
+void appendBufferedContent(const String &text, char *buffer, size_t bufferSize, size_t &used) {
+  appendBufferedContent(text.c_str(), buffer, bufferSize, used);
+}
+
+void minuteRecordJsonLine(const MinuteRingRecord &record, char *out, size_t outSize) {
+  snprintf(out, outSize,
+           "{\"minute\":%lu,\"count\":%u,\"co2_ppm\":%.1f,\"temp_c\":%.2f,\"humidity\":%.2f,\"voc_index\":%.1f,\"nox_index\":%.1f,\"lux\":%.2f,\"ok_ratio\":%.3f}",
+           static_cast<unsigned long>(record.minute),
+           static_cast<unsigned int>(record.count),
+           record.co2,
+           record.tempC,
+           record.humidity,
+           record.voc,
+           record.nox,
+           record.lux,
+           static_cast<float>(record.okPermille) / 1000.0f);
+}
+
+void minuteRecordCsvLine(const MinuteRingRecord &record, char *out, size_t outSize) {
+  snprintf(out, outSize,
+           "%lu,%u,%.1f,%.2f,%.2f,%.1f,%.1f,%.2f,%.3f\n",
+           static_cast<unsigned long>(record.minute),
+           static_cast<unsigned int>(record.count),
+           record.co2,
+           record.tempC,
+           record.humidity,
+           record.voc,
+           record.nox,
+           record.lux,
+           static_cast<float>(record.okPermille) / 1000.0f);
+}
+
 void sendMinuteHistory(uint32_t maxRows) {
   const uint32_t ringRows = gMinuteRingReady ? gMinuteRing.count : 0;
   const bool hasCurrent = gMinuteAgg.count > 0;
@@ -2136,11 +2193,13 @@ void sendMinuteHistory(uint32_t maxRows) {
 
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "application/json; charset=utf-8", "");
-  server.sendContent("{\"source\":\"minute\",\"total_rows\":");
-  server.sendContent(String(totalRows));
-  server.sendContent(",\"capacity\":");
-  server.sendContent(String(kMinuteRingCapacity));
-  server.sendContent(",\"rows\":[");
+  char outBuffer[2048];
+  char line[224];
+  size_t outUsed = 0;
+  snprintf(line, sizeof(line), "{\"source\":\"minute\",\"total_rows\":%lu,\"capacity\":%lu,\"rows\":[",
+           static_cast<unsigned long>(totalRows),
+           static_cast<unsigned long>(kMinuteRingCapacity));
+  appendBufferedContent(line, outBuffer, sizeof(outBuffer), outUsed);
 
   const uint32_t startSlot = (gMinuteRing.writeIndex + gMinuteRing.capacity - gMinuteRing.count) % gMinuteRing.capacity;
   File segmentFile;
@@ -2149,9 +2208,10 @@ void sendMinuteHistory(uint32_t maxRows) {
     MinuteRingRecord record;
     const uint32_t slot = (startSlot + i) % gMinuteRing.capacity;
     if (logicalRow++ < skipRows || !readMinuteRingSlotCached(slot, &record, segmentFile, openSegment)) continue;
-    if (!first) server.sendContent(",");
+    if (!first) appendBufferedContent(",", outBuffer, sizeof(outBuffer), outUsed);
     first = false;
-    server.sendContent(minuteRecordJson(record));
+    minuteRecordJsonLine(record, line, sizeof(line));
+    appendBufferedContent(line, outBuffer, sizeof(outBuffer), outUsed);
     if ((i & 0x1F) == 0) yield();
   }
   if (segmentFile) segmentFile.close();
@@ -2159,12 +2219,14 @@ void sendMinuteHistory(uint32_t maxRows) {
   if (hasCurrent) {
     MinuteRingRecord record;
     if (logicalRow >= skipRows && currentMinuteRecord(&record)) {
-      if (!first) server.sendContent(",");
-      server.sendContent(minuteRecordJson(record));
+      if (!first) appendBufferedContent(",", outBuffer, sizeof(outBuffer), outUsed);
+      minuteRecordJsonLine(record, line, sizeof(line));
+      appendBufferedContent(line, outBuffer, sizeof(outBuffer), outUsed);
     }
   }
 
-  server.sendContent("]}");
+  appendBufferedContent("]}", outBuffer, sizeof(outBuffer), outUsed);
+  flushBufferedContent(outBuffer, outUsed);
 }
 
 void handleHistory() {
@@ -2356,7 +2418,10 @@ void handleLogDownload() {
   }
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "text/csv; charset=utf-8", "");
-  server.sendContent("minute,count,co2_ppm,temp_c,humidity_pct,voc_index,nox_index,lux,ok_ratio\n");
+  char outBuffer[2048];
+  char line[128];
+  size_t outUsed = 0;
+  appendBufferedContent("minute,count,co2_ppm,temp_c,humidity_pct,voc_index,nox_index,lux,ok_ratio\n", outBuffer, sizeof(outBuffer), outUsed);
   const uint32_t startSlot = (gMinuteRing.writeIndex + gMinuteRing.capacity - gMinuteRing.count) % gMinuteRing.capacity;
   File segmentFile;
   int32_t openSegment = -1;
@@ -2364,15 +2429,18 @@ void handleLogDownload() {
     MinuteRingRecord record;
     const uint32_t slot = (startSlot + i) % gMinuteRing.capacity;
     if (readMinuteRingSlotCached(slot, &record, segmentFile, openSegment)) {
-      server.sendContent(minuteRecordCsv(record));
+      minuteRecordCsvLine(record, line, sizeof(line));
+      appendBufferedContent(line, outBuffer, sizeof(outBuffer), outUsed);
     }
     if ((i & 0x1F) == 0) yield();
   }
   if (segmentFile) segmentFile.close();
   MinuteRingRecord current;
   if (currentMinuteRecord(&current)) {
-    server.sendContent(minuteRecordCsv(current));
+    minuteRecordCsvLine(current, line, sizeof(line));
+    appendBufferedContent(line, outBuffer, sizeof(outBuffer), outUsed);
   }
+  flushBufferedContent(outBuffer, outUsed);
 }
 
 const char *qualityText(const char *level) {

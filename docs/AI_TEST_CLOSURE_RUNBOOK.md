@@ -38,7 +38,7 @@ Pass: no output and exit code 0.
 4. Arduino compile:
 
 ```powershell
-arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --build-path ".\.arduino-build" --build-property 'build.extra_flags=-DWIFI_STA_SSID="<ssid>" -DWIFI_STA_PASS="<redacted>"' .
+arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --build-path "$env:TEMP\esp32mini-arduino-build" --build-property 'build.extra_flags=-DWIFI_STA_SSID="<ssid>" -DWIFI_STA_PASS="<redacted>"' .
 ```
 
 Pass: compile exits 0. Never commit real password.
@@ -46,7 +46,7 @@ Pass: compile exits 0. Never commit real password.
 5. Upload:
 
 ```powershell
-arduino-cli upload -p COM20 --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --input-dir ".\.arduino-build" .
+arduino-cli upload -p COM20 --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --input-dir "$env:TEMP\esp32mini-arduino-build" .
 ```
 
 Pass: upload exits 0. Never upload to `COM9`.

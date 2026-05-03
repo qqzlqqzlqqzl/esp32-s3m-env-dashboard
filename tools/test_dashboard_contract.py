@@ -72,6 +72,13 @@ def test_history_frontend_cache_and_fast_range_switch() -> None:
     assert_regex(html, r"fetch\('/api/history\?range=all'", "all minute history should be fetched once into cache")
     assert_regex(html, r"MAX_CHART_POINTS", "chart drawing should decimate large datasets")
     assert_contains(source, "readMinuteRingSlotCached", "minute ring streaming")
+    for token in [
+        "appendBufferedContent",
+        "flushBufferedContent",
+        "minuteRecordJsonLine",
+        "minuteRecordCsvLine",
+    ]:
+        assert_contains(source, token, "buffered minute history streaming")
 
 
 def test_web_interaction_boost_contract() -> None:
@@ -104,8 +111,35 @@ def test_log_clear_button_and_post_endpoint() -> None:
 
     clear_body = extract_function_body(source, "handleLogClear")
     assert_contains(clear_body, "HTTP_POST", "handleLogClear")
+    assert_contains(clear_body, "confirm", "handleLogClear")
+    assert_contains(clear_body, "400", "handleLogClear")
     assert_contains(clear_body, "clearMinuteLog", "handleLogClear")
     assert_contains(source, 'server.on("/api/log/clear"', "server routes")
+
+
+def test_http_read_only_patrol_script_exists() -> None:
+    script = ROOT / "tools" / "http_perf_check.ps1"
+    text = read(script)
+
+    for token in [
+        "/api/status",
+        "/api/health",
+        "/api/history?range=60",
+        "/api/history?range=all",
+        "/api/log.csv",
+        "minuteCache",
+        "ensureMinuteCache",
+        "数据清零",
+        "加速查看",
+        "web_boost_active",
+        "CurlMaxSeconds",
+    ]:
+        assert_contains(text, token, "http_perf_check.ps1")
+
+    assert_contains(text, "/api/log/clear", "http_perf_check.ps1")
+    assert_contains(text, "confirm=1", "http_perf_check.ps1")
+    assert_regex(text, r"-X\s+POST.+/api/log/clear(?!\?confirm=1)", "clear protection should test unconfirmed POST only")
+    assert "api/config" not in text, "read-only patrol must not POST /api/config"
 
 
 def test_time_sync_contract() -> None:
@@ -114,7 +148,10 @@ def test_time_sync_contract() -> None:
 
     for token in [
         "#include <time.h>",
+        "kNtpServer3",
+        "ntp.aliyun.com",
         "configTzTime",
+        "kNtpServer1, kNtpServer2, kNtpServer3",
         "maintainTimeSync",
         "currentMinuteKey",
         "time_source",
@@ -175,6 +212,7 @@ def main() -> None:
         test_history_frontend_cache_and_fast_range_switch,
         test_web_interaction_boost_contract,
         test_log_clear_button_and_post_endpoint,
+        test_http_read_only_patrol_script_exists,
         test_time_sync_contract,
         test_single_button_lcd_menu_contract,
         test_docs_describe_new_dashboard_contract,

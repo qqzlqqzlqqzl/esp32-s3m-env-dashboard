@@ -39,7 +39,7 @@ For local testing with real credentials, do not commit credentials:
 ```powershell
 $env:WIFI_STA_SSID="<ssid>"
 $env:WIFI_STA_PASS="<redacted>"
-arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --build-path "$Project\.arduino-build" --build-property 'build.extra_flags=-DWIFI_STA_SSID="<ssid>" -DWIFI_STA_PASS="<redacted>"' $Project
+arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --build-path "$env:TEMP\esp32mini-arduino-build" --build-property 'build.extra_flags=-DWIFI_STA_SSID="<ssid>" -DWIFI_STA_PASS="<redacted>"' $Project
 ```
 
 Use the actual password only in the shell, never in committed docs.
@@ -47,7 +47,7 @@ Use the actual password only in the shell, never in committed docs.
 ## Upload
 
 ```powershell
-arduino-cli upload -p COM20 --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --input-dir "$Project\.arduino-build" $Project
+arduino-cli upload -p COM20 --fqbn "esp32:esp32:esp32s3:PSRAM=opi" --input-dir "$env:TEMP\esp32mini-arduino-build" $Project
 ```
 
 Do not upload to `COM9`; that is SmartUSBHub control.
