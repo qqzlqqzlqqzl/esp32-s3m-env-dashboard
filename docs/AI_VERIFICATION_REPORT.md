@@ -648,3 +648,43 @@ Verification:
 - `/api/status.storage`: raw ring count `1147`,
   `last_filtered_minute_rows=771`, `dropped_invalid_samples=6`,
   `dropped_unsynced_samples=1`.
+
+## 2026-05-03 HTTP Patrol Export Quality Gate (18:15 +08:00)
+
+Purpose:
+
+- Turn the CSV/dirty-history bug into a recurring read-only test so future
+  patrols fail before the user sees Excel mojibake, `0 lux`, zero core sensor
+  rows, or non-monotonic minute history again.
+
+Change:
+
+- `tools/http_perf_check.ps1` now checks `/api/history?range=60`,
+  `/api/history?range=all`, and `/api/log.csv` for:
+  - non-empty minute rows
+  - positive CO2, humidity, and lux values
+  - non-zero temperature
+  - strictly increasing minute keys
+  - UTF-8 BOM on CSV export for Excel compatibility
+- The script remains read-only except for the temporary web performance boost.
+  It still verifies that `POST /api/log/clear` without `confirm=1` returns HTTP
+  400 and does not clear data.
+
+Independent verification by subagent:
+
+- `python .\tools\test_dashboard_contract.py` -> `[PASS] 8 dashboard contract tests`
+- `python .\tools\test_ring_log.py` -> `[PASS] 5 ring log tests`
+- `python .\tools\test_power_config.py` -> `[PASS] 6 power contract tests`
+- `python -m py_compile .\tools\analyze_csv_log.py` -> exit 0
+- PowerShell parse check for `tools/http_perf_check.ps1` -> pass
+- `.\tools\http_perf_check.ps1 -Port COM20 -SerialSeconds 18 -WithBoost` -> PASS:
+  - Device IP: `192.168.124.67`
+  - `/api/status`: `649 ms`
+  - `/api/health`: `44 ms`
+  - `/api/history?range=60`: `1584 ms`
+  - `/api/history?range=all`: `1923 ms` for `376` rows
+  - `/api/log.csv`: `1748 ms`
+  - `/`: `137 ms`
+  - Protected clear: `68 ms`, HTTP 400 expected
+
+No log clear was performed.

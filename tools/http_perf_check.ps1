@@ -128,6 +128,45 @@ function Convert-JsonText {
   return ($Text | ConvertFrom-Json)
 }
 
+function Get-FieldValue {
+  param(
+    [object]$Row,
+    [string[]]$Names
+  )
+  foreach ($name in $Names) {
+    if ($null -ne $Row.PSObject.Properties[$name]) {
+      return [double]$Row.$name
+    }
+  }
+  throw "Row missing expected field: $($Names -join '/')"
+}
+
+function Assert-MinuteRowsClean {
+  param(
+    [object[]]$Rows,
+    [string]$Label
+  )
+  Assert-True (($Rows | Measure-Object).Count -gt 0) "$Label has no rows"
+  $zeroCore = 0
+  $zeroLux = 0
+  $backtracks = 0
+  $lastMinute = $null
+  foreach ($row in $Rows) {
+    $minute = [long](Get-FieldValue $row @("minute"))
+    $co2 = Get-FieldValue $row @("co2_ppm")
+    $temp = Get-FieldValue $row @("temp_c")
+    $humidity = Get-FieldValue $row @("humidity", "humidity_pct")
+    $lux = Get-FieldValue $row @("lux")
+    if ($co2 -le 0 -or $temp -eq 0 -or $humidity -le 0) { $zeroCore++ }
+    if ($lux -le 0) { $zeroLux++ }
+    if ($null -ne $lastMinute -and $minute -le $lastMinute) { $backtracks++ }
+    $lastMinute = $minute
+  }
+  Assert-True ($zeroCore -eq 0) "$Label contains $zeroCore zero core sensor rows"
+  Assert-True ($zeroLux -eq 0) "$Label contains $zeroLux zero/negative lux rows"
+  Assert-True ($backtracks -eq 0) "$Label contains $backtracks non-monotonic minute rows"
+}
+
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location -LiteralPath $ProjectRoot
 
@@ -186,12 +225,14 @@ $hist60Resp = Invoke-TimedCurl "$base/api/history?range=60"
 $hist60 = Convert-JsonText $hist60Resp.Text
 Assert-True ($hist60.source -eq "minute") "range=60 should return minute source"
 Assert-True (@($hist60.rows).Count -gt 0) "range=60 has no rows"
+Assert-MinuteRowsClean -Rows @($hist60.rows) -Label "/api/history?range=60"
 
 Write-Host "[CHECK] GET /api/history?range=all"
 $histAllResp = Invoke-TimedCurl "$base/api/history?range=all"
 $histAll = Convert-JsonText $histAllResp.Text
 Assert-True ($histAll.source -eq "minute") "range=all should return minute source"
 Assert-True (@($histAll.rows).Count -ge @($hist60.rows).Count) "range=all returned fewer rows than range=60"
+Assert-MinuteRowsClean -Rows @($histAll.rows) -Label "/api/history?range=all"
 if ($histAllResp.Ms -gt $WarnHistoryAllMs) {
   Write-Host "[WARN] /api/history?range=all took $($histAllResp.Ms) ms; warn threshold $WarnHistoryAllMs ms"
 }
@@ -199,6 +240,9 @@ if ($histAllResp.Ms -gt $WarnHistoryAllMs) {
 Write-Host "[CHECK] GET /api/log.csv"
 $csvResp = Invoke-TimedCurl "$base/api/log.csv"
 Assert-True ($csvResp.Text -match "minute,count,co2_ppm,temp_c,humidity_pct,voc_index,nox_index,lux,ok_ratio") "CSV header missing"
+Assert-True ($csvResp.Text.Length -gt 0 -and $csvResp.Text[0] -eq [char]0xFEFF) "CSV is missing UTF-8 BOM for Excel"
+$csvRows = $csvResp.Text | ConvertFrom-Csv
+Assert-MinuteRowsClean -Rows @($csvRows) -Label "/api/log.csv"
 if ($csvResp.Ms -gt $WarnCsvMs) {
   Write-Host "[WARN] /api/log.csv took $($csvResp.Ms) ms; warn threshold $WarnCsvMs ms"
 }
